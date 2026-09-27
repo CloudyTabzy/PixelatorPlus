@@ -842,6 +842,32 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
     last_lut_name: StringProperty(name="Last LUT Output", default="")
 
 
+# Settings that describe the workflow or UI state rather than the look.
+# Every other non-pin setting is an *effect* setting: it is captured by plan
+# snapshots and reset by style recipes (see presets.EFFECT_BASELINE).  New
+# workflow settings belong here or under a workflow prefix.
+_WORKFLOW_SETTINGS = frozenset({
+    "style_preset", "live_preview", "preview_mode", "preview_max_size",
+    "preview_cache_enabled", "preview_status", "preview_failed",
+    "v3_plan_json", "v3_plan_fingerprint", "auto_bake_render",
+    "auto_connect_baked_output",
+})
+_WORKFLOW_PREFIXES = ("sheet_", "last_")
+
+
+def _effect_setting_names():
+    """Effect settings in declaration order; image pins are excluded."""
+    return tuple(
+        name for name, prop in PixelatorPlusSettings.__annotations__.items()
+        if getattr(prop, "function", None) is not PointerProperty
+        and name not in _WORKFLOW_SETTINGS
+        and not name.startswith(_WORKFLOW_PREFIXES)
+    )
+
+
+EFFECT_SETTINGS = _effect_setting_names()
+
+
 def ensure_v3_stages(settings):
     """Complete the canonical v3 stage stack and return it.
 
@@ -879,52 +905,17 @@ def collect_snapshot_params(settings):
     stored value back to its Blender property even while its matching option
     is disabled.
     """
-    keys = (
-        "use_separate_pixel_count", "square_pixel_count", "pixel_count_x",
-        "pixel_count_y", "downscale_mode", "scale_algorithm", "scale_tolerance",
-        "content_aware_factor", "content_aware_max_dimension", "content_aware_seam_mode",
-        "filter_preview", "dither_type",
-        "dither_strategy", "dither_blend_mode", "use_gray_dither", "dither_strength",
-        "dither_saturation", "lock_dither_to_grid", "dither_mask_type", "dither_cutoff",
-        "dither_mask_gamma", "palette_dither_contrast", "palette_dither_invert",
-        "preview_dither_mask", "dither_mask_lum_low", "dither_mask_lum_high",
-        "dither_mask_sat_low", "dither_mask_sat_high", "dither_mask_gradient_angle",
-        "dither_mask_invert", "dither_mask_blur", "show_mask_controls",
-        "huge", "big", "large",
-        "medium", "fine", "sharp", "pixel_perfect", "quantize_type",
-        "posterize_enabled", "posterize_levels", "posterize_range_mode",
-        "posterize_range_low", "posterize_range_high", "posterize_percentile_low",
-        "posterize_percentile_high", "posterize_gamma", "posterize_mix",
-        "posterize_channel_mask", "posterize_alpha_policy",
-        "diffusion", "diffusion_strength", "diffusion_serpentine",
-        "initialize_mode", "color_mode", "apply_palette_mode",
-        "quantize_quality", "quantize_seed", "use_explicit_quantize_seed",
-        "chroma_importance", "use_chroma_importance",
-        "use_pixelated_for_quantize", "palette_extract_method",
-        "palette_sort_mode", "palette_shift", "palette_trim", "palette_replace_threshold",
-        "k_num_colors", "gamma", "force_colors",
-        "output_palette", "output_lut", "use_range_adaptive",
-        "quantize_colors_or_bits", "quantize_colors", "quantize_bits",
-        "output_default_lut", "lut", "cube_lut_path", "cube_lut_interpolation",
-        "cube_lut_strength", "random_seed",
-        "finish_enabled", "finish_brightness", "finish_contrast", "finish_exposure",
-        "finish_saturation", "finish_grain", "finish_grain_brightness",
-        "finish_grain_saturation", "finish_scanline_strength", "finish_scanline_size",
-        "finish_scanline_axis", "finish_scanline_invert", "finish_vignette_strength",
-        "finish_vignette_roundness", "finish_chromatic_aberration", "finish_mask_type",
-        "finish_mask_mix", "finish_mask_invert", "finish_channel_mask",
-        "sprite_cleanup", "sprite_cleanup_agreement", "sprite_outline",
-        "sprite_outline_color_mode", "sprite_outline_darken", "sprite_outline_corners",
-        "sprite_alpha_threshold",
-    )
-    params = {k: getattr(settings, k) for k in keys}
-    params["sprite_outline_color"] = tuple(settings.sprite_outline_color)
+    params = {}
+    for name in EFFECT_SETTINGS:
+        value = getattr(settings, name)
+        if hasattr(value, "__len__") and not isinstance(value, str):
+            value = tuple(value)  # vector properties (colors, tile sizes)
+        params[name] = value
     # Parameter collection runs from preview and Apply paths.  It must report
     # an existing stage policy without initializing the collection or forcing
     # a disabled flag back on; operators and presets explicitly initialize
     # the stack when that mutation is wanted.
     stack = settings.v3.stage_stack
-    params["custom_dither_resolution"] = tuple(settings.custom_dither_resolution)
     params["v3_stage_order"] = tuple(item.stage_id for item in stack)
     params["v3_stage_enabled"] = {item.stage_id: bool(item.enabled) for item in stack}
     params["v3_palette_lock"] = settings.v3.palette_lock
