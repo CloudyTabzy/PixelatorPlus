@@ -25,6 +25,7 @@ from .plan import normalize_plan, plan_to_params, stage_types
 from .pixelate import (
     compute_grid,
     downscale_area,
+    downscale_nearest,
     pixelate,
     resample_preview,
     upscale_nearest,
@@ -76,8 +77,31 @@ def _palette_operations(colors, params, images=None):
     return np.clip(colors, 0.0, 1.0).astype(np.float32)
 
 
+def _palette_samples(image, grid, alpha, params):
+    """Return the ``(N, 3)`` colors a generated palette is built from.
+
+    Samples the full-resolution ``image`` or, with Use Pixelated, the cell
+    ``grid``.  Fully transparent pixels (a render's empty background) are
+    skipped: nobody sees them, yet they would cost a palette entry and skew
+    forced darkest/brightest colors.  Opaque images keep every pixel, in
+    order, so their palettes are unchanged.
+    """
+    if params.get("use_pixelated_for_quantize", False):
+        gh, gw = grid.shape[:2]
+        if params.get("downscale_mode", "NEAREST") == "NEAREST_SOFTER":
+            alpha = downscale_area(alpha, gw, gh)
+        else:
+            alpha = downscale_nearest(alpha, gw, gh)
+        image = grid
+    colors = np.asarray(image, dtype=np.float32)[..., :3].reshape(-1, 3)
+    visible = np.asarray(alpha).reshape(-1) > 1e-6
+    if visible.any() and not visible.all():
+        colors = colors[visible]
+    return colors
+
+
 def _generated_palette(source, params, images=None):
-    """Build the selected generated palette workflow."""
+    """Build the selected generated palette from ``(N, 3)`` sample colors."""
     method = str(params.get("palette_extract_method", "KMEANS")).upper()
     if method in ("FREQUENCY", "EXACT"):
         colors = palette_mod.extract_palette(
@@ -139,11 +163,11 @@ def _cube_lut(images, params):
     return lut
 
 
-def _palette_for_threshold(pixelated, grid, params, images):
+def _palette_for_threshold(pixelated, grid, alpha, params, images):
     qtype = params.get("quantize_type", "NONE")
     if qtype == "CUSTOM_PALETTE":
-        source = grid if params.get("use_pixelated_for_quantize", False) else pixelated
-        return _generated_palette(source, params, images)
+        samples = _palette_samples(pixelated, grid, alpha, params)
+        return _generated_palette(samples, params, images)
     if qtype == "LUT":
         return _lut_palette(params, images)
     custom = images.get("custom_palette")
@@ -361,7 +385,7 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
                 "grid": (gw, gh), "plan": plan, "source_palette_colors": None,
             }
         if dither_strategy == "PALETTE_THRESHOLD":
-            palette_colors = _palette_for_threshold(pixelated, grid, params, images)
+            palette_colors = _palette_for_threshold(pixelated, grid, alpha, params, images)
             if palette_colors is None or palette_colors.shape[0] < 2:
                 raise PipelineError(
                     "Palette Threshold dithering requires a palette quantization mode "
@@ -412,8 +436,8 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
 
     if "quantize" in active_stages and qtype == "CUSTOM_PALETTE":
         if palette_colors is None:
-            source = grid if params.get("use_pixelated_for_quantize", False) else out
-            palette_colors = _generated_palette(source, params, images)
+            samples = _palette_samples(out, grid, alpha, params)
+            palette_colors = _generated_palette(samples, params, images)
         out, palette_indices = _palette_quantize(
             out, gw, gh, palette_colors, apply_mode, params, retain_palette_indices
         )
