@@ -6,6 +6,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.3.0] - 2026-09-28
+
+### Added
+
+- **Render Sprite Sheet**: renders the scene or a custom frame range, runs
+  every frame through the exact pipeline, collapses frames to native pixel
+  resolution (optional whole-number scale), and packs them into a sheet image.
+  It runs one frame at a time with progress and Esc to cancel, keeps rendered
+  frames in a temporary folder instead of memory, and restores every scene
+  setting it touches.
+- **Shared Palette**: one generated palette built from all frames, so
+  animations never flicker.
+- Sheet layouts (Grid, Row, Column), columns, spacing, padding, shared-box
+  trimming, and empty-frame skipping, adapted from the Pixel Composer research.
+- **Export Sprite Sheet**: PNG plus a TexturePacker/Aseprite-style JSON atlas
+  with frame rectangles, durations, and the shared palette.
+
+### Fixed
+
+- Exporting with Blender Output Settings failed on Blender 5.x when the scene
+  was set to video output, or for OpenEXR (which has no 8-bit depth). The
+  exporter now selects the matching media type, falls back to the nearest
+  supported depth and color mode, and reports every adjustment. Multilayer
+  requests are saved as flat OpenEXR.
+
+### Changed
+
+- The pipeline accepts `images["shared_palette"]`, and
+  `core.pipeline.build_shared_palette()` builds it from several frames.
+
 ## [3.2.0] - 2026-09-28
 
 ### Changed
