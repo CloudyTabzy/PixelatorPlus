@@ -6,6 +6,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.1.0] - 2026-09-28
+
+### Added
+
+- **Sprite** stage (after Quantize, before Display Finish) for turning
+  transparent renders into game sprites. **Remove Stray Pixels** replaces
+  isolated cells with the color their neighbors agree on, and fills
+  one-cell holes. **Outline** draws a one-cell Outside or Inside outline in
+  Selective (darkened neighbor), Darkest palette, or Custom color, with
+  optional corners. Both work on the pixel grid and stay palette-exact.
+- **Freeze Palette for Animation**: applies once, saves the generated
+  palette as an image, and switches quantization to it so every later frame
+  maps onto identical colors.
+- **Game Sprite** style recipe.
+- The live preview reports when it is approximate (the 4K custom LUT is
+  skipped) or out of date after an error, instead of silently keeping the
+  previous image.
+
+### Fixed
+
+- `.cube` LUT paths relative to the saved `.blend` (`//...`, Blender's
+  default) now load; the path property declares relative-path support on
+  Blender versions that ask for it.
+- Editing a `.cube` file in place now refreshes a cached live preview.
+- Parsed LUTs are fingerprinted by content in the preview cache, and values
+  that cannot be fingerprinted are rejected instead of keyed by identity.
+- A stage stack saved by an older version can no longer place a newer stage
+  out of dependency order.
+
+### Changed
+
+- Plan schema version 5 adds the `sprite` stage; schema 1–4 plans still load.
+- Pipeline results include `source_palette_colors`, the palette before
+  Palette Tint.
+
 ## [3.0.1] - 2026-09-28
 
 ### Fixed

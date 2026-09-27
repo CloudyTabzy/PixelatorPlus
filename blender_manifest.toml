@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "pixelatorplus"
-version = "3.0.1"
+version = "3.1.0"
 name = "PixelatorPlus"
 tagline = "Retro pixel-art image processing for Blender"
 maintainer = "CloudyTabzy <CloudyTabzy@users.noreply.github.com>"
