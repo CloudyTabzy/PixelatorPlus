@@ -1,0 +1,30 @@
+schema_version = "1.0.0"
+
+id = "pixelatorplus"
+version = "3.0.1"
+name = "PixelatorPlus"
+tagline = "Retro pixel-art image processing for Blender"
+maintainer = "CloudyTabzy <CloudyTabzy@users.noreply.github.com>"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 CloudyTabzy"]
+
+[permissions]
+files = "Read images/.cube LUTs; write selected image/palette/LUT files"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  ".*",
+  "*.pyc",
+  "*.pyo",
+  "*.blend1",
+  "*.zip",
+  # Human-inspection copy of the runtime blue-noise array.
+  "/assets/blue_noise_64.png",
+  # Repository documentation for GitHub; not needed inside Blender.
+  "/README.md",
+  "/CHANGELOG.md",
+]

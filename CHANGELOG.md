@@ -1,0 +1,365 @@
+# Changelog
+
+All notable changes to PixelatorPlus for Blender are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and the extension version follows [Semantic Versioning](https://semver.org/)
+(`blender_manifest.toml` is the single source of truth).
+
+## [3.0.1] - 2026-09-28
+
+### Fixed
+
+- Apply outputs are owned per scene, source image, and output role, and are
+  resized in place, so material and compositor references survive a change
+  in output dimensions and scenes no longer overwrite each other's results.
+- Palette Tint preserves each pixel's palette index, and the palette swatch,
+  index image, and generated LUT describe the final tinted palette.
+- Canonical plan stages and outputs take precedence over stale legacy flags;
+  the default-LUT output has its own plan declaration.
+- Plan snapshots keep values of disabled controls (explicit palette seed,
+  Color Importance) so restoring a snapshot restores them.
+- The Posterize alpha policy and the `.cube` LUT strength are honored in
+  every path, including error diffusion.
+- Live preview and Apply resolve the same custom image pins, so a custom
+  Display Finish mask no longer fails in preview.
+- Palette JSON is decoded by its declared format, so very dark RGB8 colors
+  no longer load as white.
+- The Advanced (V3) panel no longer creates or edits the stage stack while
+  drawing, which Blender forbids. New scenes show an **Initialize Stage
+  Stack** button; files with an incomplete stack show **Repair Stage Stack**.
+  Pixelate is shown as a required, non-toggleable stage.
+- Completing an intact stage stack no longer rewrites Pixelate's flag, so it
+  no longer invalidates the live preview.
+- Stage-stack repair keeps the dependency order when adding missing stages.
+- Palette Threshold dithering now defaults to the RGB palette apply space
+  like every other palette lookup (spec default for `Apply_Palette_Mode`).
+- Dither-mask preview results now include the same `plan` key as normal
+  results.
+- Wire Output to Active Material is unavailable for objects that cannot hold
+  materials (e.g. empties) instead of failing.
+- Live preview no longer replaces the image in pinned Image Editors.
+
+### Changed
+
+- Trilinear `.cube` sampling works in bounded batches, and the parsed-LUT
+  cache is a size-limited LRU.
+- Faster nearest-palette lookup (about 2.8× on full-resolution palette
+  snaps) and error diffusion (about 2.5–5× depending on the kernel). Both
+  produce bit-identical output.
+- Edge/flat dither masks and mask blur use a separable box filter, which
+  avoids full-image index grids (roughly 1 GB peak on a 4K image) and is
+  about 2× faster. Differences stay within 1.2e-7.
+- Consolidated the quantize stage's repeated palette-snap and grid-diffusion
+  branches into shared helpers; registration now uses
+  `bpy.utils.register_classes_factory`.
+
+### Removed
+
+- The bundled 4096x4096 identity LUT image (`assets/luts/identity.png`,
+  about 36 MB). **Output the Default LUT** generates the same image inside
+  Blender, and the extension download shrinks by roughly 33 MB.
+- The inspection-only `blue_noise_64.png` is no longer packaged; the add-on
+  uses `blue_noise_64.npy` at runtime.
+
+## [3.0.0] - 2026-08-18
+
+### Added
+
+- Promoted the staged pipeline to a canonical v3 executor with explicit
+  dependency order, per-stage enable policy, schema version 4, and structured
+  nested v3 settings.
+- Added the **PixelatorPlus Creative Core**: **Index Guard** palette locking,
+  **Palette Tint** index-preserving color styling, and **Grid Coherence** for
+  dither-per-cell or final-cell output.
+- Added a visible dependency-ordered V3 Stage Stack in the Advanced panel.
+
+### Changed
+
+- Made v3 plan policies and stage enable flags part of scene snapshots while
+  retaining the flat v2 settings as an explicit migration/compatibility layer.
+- Kept image pins as Blender datablock links and preserved the exact NumPy
+  Apply/Export path; no external compositor runtime or copied Pixel Composer
+  execution model was introduced.
+
+### Compatibility
+
+- Existing operator IDs, normal settings, presets, compositor bake workflow,
+  and legacy plan snapshots remain readable. The v3 schema rejects invalid
+  stage order instead of silently producing an ambiguous result.
+
+## [2.8.0] - 2026-08-18
+
+### Added
+
+- Added a validated v3 plan snapshot format with stable fingerprints and JSON
+  round-trip support.
+- Added **Capture / Migrate** and **Restore** actions in the Advanced (V3)
+  panel. Existing flat scene settings remain the compatibility surface; image
+  datablock pins stay linked in Blender and are not copied into the snapshot.
+
+### Changed
+
+- Expanded plan normalization to retain advanced mask controls, custom dither
+  resolution, and palette seed/weight settings during migration.
+- Kept migration explicit and scene-local: the extension does not save user
+  preferences or start background threads.
+
+## [2.7.0] - 2026-08-18
+
+### Added
+
+- Added a real Posterize / Levels stage with full-range, image min/max, and
+  robust percentile bounds, gamma-shaped thresholds, channel selection, mix,
+  and alpha policy controls.
+- Added named `strength_map`, `threshold_map`, and `range_map` image inputs to
+  the shared staged pipeline contract.
+- Added a bounded deterministic live-preview cache. It runs entirely on
+  Blender's main thread; no Python worker threads are created.
+- Added portable Palette JSON export and `.cube` LUT export from either the
+  generated palette or a native 4K LUT, with compact 8³–64³ output sizes.
+- Added stage cost metadata and regression coverage for the new contract,
+  preview cache, Posterize stage, palette serialization, and LUT round trips.
+
+### Changed
+
+- The internal plan adapter now executes and gates the Posterize stage in the
+  ordered pipeline while retaining the flat v2 settings and operator IDs.
+- Preview applies named maps and caches identical capped-resolution results;
+  Apply and Export continue to use the uncached NumPy reference path.
+- Updated extension file-permission metadata for user-selected palette and LUT
+  files while staying within Blender's manifest description limit.
+
+## [2.6.3] - 2026-08-18
+
+### Changed
+
+- Restored Blender's native LUT enum popup so the two-column selector sizes to
+  its contents instead of inheriting the full editor width.
+
+## [2.6.2] - 2026-08-18
+
+### Fixed
+
+- Constrained the LUT selector popup to a compact fixed width so its two
+  columns no longer expand across the surrounding Blender editor.
+
+## [2.6.1] - 2026-08-18
+
+### Changed
+
+- Merged the identical TIC-80 and Sweetie-16 palette entries into one
+  `TIC-80 / Sweetie 16` sidebar menu item while retaining both core palette
+  identifiers for pipeline compatibility.
+
+## [2.6.0] - 2026-08-18
+
+### Added
+
+- Added a collapsed **Advanced (V3)** nested panel to both the Image Editor and
+  Compositor sidebars for the staged scaling, palette, portable LUT, and display
+  finish controls.
+
+### Changed
+
+- Preserved the normal settings panel, Style Recipes, and **Surprise Me** as the
+  primary workflow while exposing the same shared settings through the advanced
+  panel; no duplicate settings state or migration is introduced.
+
+## [2.5.0] - 2026-08-18
+
+### Added
+
+- Added an internal stage-plan compatibility layer while preserving the flat
+  v2 settings and pipeline entry points.
+- Added palette-aware threshold dithering with palette-boundary contrast and
+  invert controls.
+- Added frequency/exact-color palette extraction, palette sorting, shifting,
+  trimming, replacement, and reusable pure-NumPy `PaletteAsset` utilities.
+- Added Jarvis–Judice–Ninke and Linear error-diffusion kernels plus an explicit
+  serpentine-scan toggle.
+- Added portable `.cube` 3D-LUT import with domain-range handling,
+  nearest/trilinear sampling, strength control, and parsed-file caching.
+- Added Scale2x, Scale3x, CleanEdge-style, and capped content-aware scaling
+  modes with content-aware seam selection.
+- Added an optional display-finish stack: brightness, contrast, exposure,
+  saturation, grain, scanlines, vignette, chromatic aberration, masks, and
+  channel selection.
+- Added pure-NumPy regression tests and Blender 5.2 E2E coverage for the new
+  feature surface.
+
+### Changed
+
+- Extended the Blender permissions declaration to cover user-selected `.cube`
+  LUT files.
+- Kept the current compositor hybrid and v2 operator/settings compatibility
+  boundary intact; the breaking nested-property migration remains reserved for
+  a future 3.0 release.
+
+## [2.4.0] - 2026-08-14
+
+### Changed
+
+- Replaced the subtle Gameboy Color and SNES 15-bit reducers with distinct,
+  high-contrast 32-color presentation palettes. Every entry remains a valid
+  RGB555 hardware color, while the compact palettes provide a clearly visible
+  retro look.
+- Added generated 4K image LUT presets for both stylized modes, including the
+  previously missing SNES asset.
+
+## [2.3.0] - 2026-08-14
+
+### Added
+
+- **Error Diffusion** for every quantization mode (Generate Custom Palette,
+  Per Channel, Lookup Table / Palette): Floyd–Steinberg, Atkinson, and
+  Sierra Lite kernels with a strength control. Diffusion snaps colors at
+  pixel-grid resolution (area-downscale, serpentine diffusion, nearest
+  upscale) for the classic Macintosh / newsprint look. Add-on extra.
+- **New dither maps** (add-on extras): Halftone Dot (45-degree screen),
+  Halftone Line, Crosshatch, Bayer 2x2 and 4x4, and Suzanne — an original
+  hand-drawn Blender-monkey mascot threshold pattern in the spirit of the
+  original filter's Amogus.
+- **New dither mask sources** (add-on extras): Luminance Range and Saturation
+  Range band masks with low/high sliders, Gradient Ramp mask with angle
+  control, and Radial Falloff mask — plus Invert and Blur post-ops applicable
+  to every mask type.
+- **Expanded built-in palettes** (add-on extras; LUT list grew from 10 to 30
+  entries): ZX Spectrum, Amstrad CPC, MSX, VIC-20, CGA/EGA, BBC Micro,
+  SNES/Genesis/Apple IIGS bit-depth reducers, PICO-8, TIC-80, DawnBringer 32,
+  Resurrect 64, Endesga 16/32, Sweetie 16, and 2/4/8/16-step grayscale ramps.
+  Community palette values verified against their public sources; attributions
+  recorded in `THIRD_PARTY_NOTICES.md`.
+- **Three new style recipes**: Macintosh 1-Bit (Atkinson diffusion onto a
+  2-step grayscale ramp), Newsprint Halftone (dot screen under a 4-step gray
+  ramp), and Monkey Business (Suzanne dither over DawnBringer 32).
+- `palette_from_image()` helper in `core/quantize.py` so the custom-palette
+  image path and the diffusion path share one extraction implementation.
+
+<!-- Earlier release history is documented retroactively by the maintainers. -->
+
+## [2.2.1] - 2026-08-14
+
+### Fixed
+
+- Export dialogs now start with a sanitized basename derived from the relevant
+  Blender image datablock: processed output, palette swatches, and 4K LUTs.
+- Changing the selected processed-image format updates only the extension,
+  preserving the descriptive image basename.
+
+## [2.2.0] - 2026-08-14
+
+### Added
+
+- Expanded **Export Processed Image** beyond PNG and Targa to include JPEG,
+  JPEG 2000, WebP, BMP, Targa Raw, TIFF, OpenEXR, OpenEXR MultiLayer, Radiance
+  HDR, DPX, Cineon, and Iris, filtered against the host Blender build.
+- A **Preserve Pixels** export path for writing the generated PixelatorPlus
+  values directly.
+- A **Blender Output Settings** path exposing color mode, bit depth, quality,
+  compression, format codecs, preview embedding, and temporary scene color
+  management.
+
+### Changed
+
+- Advanced exports restore every temporarily changed scene image setting after
+  saving, including when an export raises an error.
+
+## [2.1.0] - 2026-08-14
+
+### Added
+
+- Twelve editable style recipes covering modern indie, 1-bit ink, handheld,
+  console, home-computer, demoscene, arcade, painterly, web-safe, and
+  glitch-oriented looks.
+- A bounded **Surprise Me** action that chooses a recipe and varies safe
+  parameters such as resolution, dither strength, palette size, and seed.
+- Deterministic recipe tests plus Blender E2E coverage for loading every recipe.
+
+### Fixed
+
+- The Compositor sidebar now initializes its settings reference before drawing
+  the exact-output controls.
+
+## [2.0.0] - 2026-08-14
+
+### Added
+
+- Added official-publication metadata, CloudyTabzy maintainer attribution,
+  GPL-3.0-or-later source licensing, CC0 generated-asset licensing, and clean-
+  room provenance notices.
+- Added Blender extension validation and packaging hardening, including the
+  final permissions declaration and exclusion of development artifacts from
+  release archives.
+
+### Changed
+
+- Changed compositor asset registration from automatic preference mutation on
+  enable to an explicit user action with repair behavior.
+- Hardened packaging and documentation for Blender 5.2 forward compatibility.
+
+## [1.4.1] - 2026-08-14
+
+### Fixed
+
+- Added Blender 5.2-compatible compositor handling through the modern
+  `Scene.compositing_node_group` and `NodeGroupOutput` boundary while retaining
+  compatibility with the 5.0 compositor tree.
+- Updated the extension build helper to discover Blender 5.2, 5.1, and 5.0
+  installations.
+
+## [1.4.0] - 2026-08-14
+
+### Changed
+
+- Unified the previously version-gated control surface into one non-versioned
+  panel so dithering, masks, Oklab, custom palette inputs, fixed-size dither
+  variants, and other reconstructed controls are available together.
+- Removed the redundant filter-version selector and updated parameter
+  collection to carry the complete settings surface.
+
+## [1.3.0] - 2026-08-14
+
+### Added
+
+- Added the hybrid exact compositor workflow: bake the full NumPy result into
+  a named compositor Image node from either the input image or Render Result.
+- Added explicit connection of the baked output to the compositor output and
+  optional auto-baking after completed renders, with auto-connect kept as a
+  separate opt-in.
+
+## [1.2.0] - 2026-08-14
+
+### Added
+
+- Added native Blender compositor node-group assets for adjustable Pixelate,
+  fixed 4px/8px/16px Pixelate variants, and Pixelate + Posterize recipes.
+- Added the bundled compositor asset catalog and generator tooling, with asset
+  metadata and CC0 declarations.
+
+## [1.1.0] - 2026-08-14
+
+### Added
+
+- Evolved the native Blender workflow with debounced capped live preview,
+  Draft versus Final preview modes, palette and palette-index outputs, and
+  safer generated-image handling.
+- Added native material hookup from the processed image to Principled BSDF Base
+  Color with Closest interpolation, plus the Base Color grab workflow.
+- Improved quantization controls, explicit seeds, output handling, and
+  color-management-safe image export behavior.
+
+## [1.0.0] - 2026-08-14
+
+### Added
+
+- Initial native Blender 4.2+ extension implementation of the reconstructed
+  PixelatorPlus v2.72 workflow.
+- Pure NumPy color-space, pixelation, dithering, quantization, palette, and 4K
+  LUT pipeline behind a thin optional-`bpy` boundary.
+- Nearest and Nearest Softer pixelation, white/blue-noise and ordered/custom
+  dither maps, edge/flat/custom masks, RGB/CIELAB/Oklab palette generation,
+  per-channel reduction, vintage built-in palettes, custom LUTs, and PNG/Targa
+  output operators.
+- Headless-Blender E2E coverage, deterministic core tests, blue-noise assets,
+  and extension packaging tools.

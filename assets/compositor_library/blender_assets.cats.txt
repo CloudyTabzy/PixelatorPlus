@@ -1,0 +1,5 @@
+# This is an Asset Catalog Definition file for Blender.
+#
+VERSION 1
+9d988bea-7136-4fd6-9da3-056262f7bd03:PixelatorPlus:PixelatorPlus
+a4f4934e-befd-4ba7-9b20-580675823af6:PixelatorPlus/Compositor:Compositor
