@@ -47,6 +47,21 @@ def _compositor_tree(scene):
     return tree
 
 
+def baked_output_drives_compositor(scene):
+    """True when the static baked Image node is linked into the compositor.
+
+    Renders then return that fixed image for every frame, so frame-by-frame
+    work (sprite sheets) must bypass compositing.  Never creates a tree.
+    """
+    tree = getattr(scene, "compositing_node_group", None) or getattr(scene, "node_tree", None)
+    if tree is None:
+        return False
+    return any(
+        node.get(BAKED_NODE_FLAG) and any(output.links for output in node.outputs)
+        for node in tree.nodes
+    )
+
+
 def _baked_output_node(scene, image):
     """Create or update the one Image node that represents exact output."""
     tree = _compositor_tree(scene)

@@ -106,7 +106,7 @@ _RUNTIME_JPEG2K_CODEC_ITEMS = _runtime_items("jpeg2k_codec", _JPEG2K_CODEC_ITEMS
 _RUNTIME_TIFF_CODEC_ITEMS = _runtime_items("tiff_codec", _TIFF_CODEC_ITEMS)
 
 
-def _save_image(image, filepath, file_format, quality=95):
+def save_image_copy(image, filepath, file_format, quality=95):
     """Save a generated image copy while preserving its Blender data settings."""
     old = (image.filepath_raw, image.file_format, image.alpha_mode)
     image.filepath_raw = filepath
@@ -328,7 +328,7 @@ class PIXELATORPLUS_OT_export_output(bpy.types.Operator, ExportHelper):
                     "use_preview": self.use_preview,
                 }, context.scene)
             else:
-                _save_image(image, filepath, self.export_format, quality=self.quality)
+                save_image_copy(image, filepath, self.export_format, quality=self.quality)
         except (OSError, RuntimeError, ValueError) as exc:
             self.report({"ERROR"}, f"Could not export image: {exc}")
             return {"CANCELLED"}
@@ -363,7 +363,7 @@ class PIXELATORPLUS_OT_export_palette(bpy.types.Operator, ExportHelper):
     def execute(self, context):
         s = context.scene.pixelatorplus
         image = bpy.data.images[s.last_palette_name]
-        _save_image(image, self.filepath, "PNG")
+        save_image_copy(image, self.filepath, "PNG")
         self.report({"INFO"}, f"Palette saved to {self.filepath}")
         return {"FINISHED"}
 
@@ -391,7 +391,7 @@ class PIXELATORPLUS_OT_export_lut(bpy.types.Operator, ExportHelper):
     def execute(self, context):
         s = context.scene.pixelatorplus
         image = bpy.data.images[s.last_lut_name]
-        _save_image(image, self.filepath, "PNG")
+        save_image_copy(image, self.filepath, "PNG")
         self.report({"INFO"}, f"LUT saved to {self.filepath}")
         return {"FINISHED"}
 

@@ -365,6 +365,47 @@ def _draw_output(layout, s):
     body.operator("pixelatorplus.material_hookup", icon="MATERIAL")
 
 
+def _draw_sprite_sheet(layout, scene):
+    s = scene.pixelatorplus
+    if s.sheet_use_scene_range:
+        start, end = scene.frame_start, scene.frame_end
+    else:
+        start, end = s.sheet_frame_start, s.sheet_frame_end
+    count = len(range(start, end + 1, max(1, s.sheet_frame_step)))
+    body = _section(layout, "sprite_sheet", "Sprite Sheet", "RENDER_ANIMATION",
+                    f"{count} frames" if count else "No frames")
+    if body is None:
+        return
+    row = body.row()
+    row.scale_y = 1.3
+    row.operator("pixelatorplus.render_sprite_sheet", icon="RENDER_ANIMATION")
+    if scene.camera is None:
+        body.label(text="Needs an active scene camera.", icon="ERROR")
+    body.prop(s, "sheet_use_scene_range", text="Scene Range")
+    if not s.sheet_use_scene_range:
+        col = body.column(align=True)
+        col.prop(s, "sheet_frame_start", text="Frame Start")
+        col.prop(s, "sheet_frame_end", text="End")
+    body.prop(s, "sheet_frame_step")
+    body.prop(s, "sheet_layout")
+    if s.sheet_layout == "GRID":
+        body.prop(s, "sheet_columns")
+    col = body.column(align=True)
+    col.prop(s, "sheet_spacing")
+    col.prop(s, "sheet_padding")
+    body.prop(s, "sheet_pixel_scale")
+    body.prop(s, "sheet_trim")
+    body.prop(s, "sheet_skip_empty")
+    body.prop(s, "sheet_transparent")
+    row = body.row()
+    # Only generated palettes can differ between frames.
+    row.active = s.quantize_type == "CUSTOM_PALETTE"
+    row.prop(s, "sheet_shared_palette")
+    if s.last_sheet_name:
+        body.label(text=s.last_sheet_name, icon="CHECKMARK")
+        body.operator("pixelatorplus.export_sprite_sheet", icon="EXPORT")
+
+
 def _draw_advanced(layout, s):
     body = _section(layout, "advanced", "Advanced", "OPTIONS")
     if body is None:
@@ -451,6 +492,7 @@ def _draw(layout, context, compositor=False):
     _draw_sprite(layout, s)
     _draw_finish(layout, s)
     _draw_output(layout, s)
+    _draw_sprite_sheet(layout, context.scene)
     if compositor:
         _draw_compositor(layout, s)
     _draw_advanced(layout, s)

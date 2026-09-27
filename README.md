@@ -28,8 +28,9 @@ external app, or internet connection required.
 - **From 3D render to game sprite.** Render your model with a transparent
   background, then let PixelatorPlus clean up stray pixels and draw a crisp
   one-pixel outline, just like a pixel artist would.
-- **Animation without flicker.** **Freeze Palette** locks the colors of one
-  frame so every other frame uses exactly the same palette.
+- **Animation to sprite sheet in one click.** **Render Sprite Sheet** renders
+  your animation, pixelates every frame with one shared palette (no color
+  flicker), and packs them into a game-ready sheet with a JSON atlas.
 - **Pixel art that stays pixel art.** Unique **Palette Lock** and **Grid
   Coherence** controls keep finishing effects from smearing your palette or
   breaking the pixel grid.
@@ -92,6 +93,21 @@ external app, or internet connection required.
   color, or a **Custom** color. Outlines stay on your palette.
 - **Outline Corners** adds diagonal pixels for a heavier, rounder look.
 
+### Sprite Sheet
+
+- **Render Sprite Sheet** renders the scene or a custom frame range (with a
+  frame step), pixelates each frame, and packs them into one image. Press
+  **Esc** to cancel; your render settings are always restored.
+- Frames are saved at **native resolution**, one sprite pixel per image
+  pixel, with an optional whole-number **Pixel Scale**.
+- **Grid**, **Row**, or **Column** layouts, with columns, spacing, and
+  padding. **Trim Empty Space** crops every frame to the same box, so the
+  animation stays aligned; **Skip Empty Frames** drops blank ones.
+- **Shared Palette** builds one palette from all frames at once.
+- **Export Sprite Sheet** writes the PNG plus a TexturePacker/Aseprite-style
+  JSON atlas (frame rectangles, durations, and the palette) that Godot,
+  Phaser, PixiJS, and most engines can import.
+
 ### Finish
 
 - Brightness, contrast, exposure, saturation, film grain, CRT scanlines,
@@ -146,9 +162,9 @@ Requires **Blender 4.2 or newer**. Tested on Blender 5.2 LTS.
 5. Press **Apply PixelatorPlus**. Your result appears as
    `<image name> [PixelatorPlus]`, and repeat runs update that same image.
 
-Making sprites? Load the **Game Sprite** recipe, render your model with
-**Film → Transparent** enabled, and use the render as the input. For an
-animation, press **Freeze Palette for Animation** on the first frame.
+Making sprites? Load the **Game Sprite** recipe, point a camera at your
+animated model, and press **Render Sprite Sheet**. The background is rendered
+transparent automatically, so outlines follow the silhouette.
 
 The sidebar keeps the essentials (input, recipe, Apply, live preview) at
 the top. Below them, foldable **Pixels**, **Color**, **Dither**, **Sprite**,
