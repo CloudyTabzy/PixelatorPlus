@@ -140,6 +140,8 @@ code, binaries, or assets, and it is not affiliated with or endorsed by
 Pixel8r's rights holders. Built-in palettes are rebuilt from public
 definitions and credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+Copyright (C) 2026 CloudyTabzy.
+
 - Program source: **GPL-3.0-or-later** (see [LICENSE](LICENSE)).
 - Bundled textures, LUTs, palettes, and compositor assets: **CC0-1.0** (see
   [assets/ASSET_LICENSE.txt](assets/ASSET_LICENSE.txt)).
