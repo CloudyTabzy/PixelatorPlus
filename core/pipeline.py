@@ -130,6 +130,57 @@ def _generated_palette(source, params, images=None):
     return _palette_operations(colors, params, images)
 
 
+def _generated_or_shared_palette(image, grid, alpha, params, images):
+    """The generated palette, or the animation-wide one when supplied.
+
+    ``images["shared_palette"]`` (``(K, 3)``, from :func:`build_shared_palette`)
+    replaces per-frame generation, so every frame of an animation uses the
+    identical colors.  Palette edits were already applied when it was built.
+    """
+    shared = images.get("shared_palette")
+    if shared is not None:
+        return np.asarray(shared, dtype=np.float32)[:, :3]
+    return _generated_palette(_palette_samples(image, grid, alpha, params), params, images)
+
+
+def build_shared_palette(frames, params, images=None, samples_per_frame=65536):
+    """Generate one palette from several frames so an animation never flickers.
+
+    ``frames`` is an iterable of ``(h, w, 4)`` float32 images (it may be a
+    generator that loads frames lazily).  Each frame runs the stages before
+    quantization, and up to ``samples_per_frame`` evenly spaced visible colors
+    per frame are pooled; the pool then goes through the normal generated
+    palette workflow (extraction method, forced colors, sort, shift, trim,
+    replacement).  Returns ``(K, 3)`` float32 for ``images["shared_palette"]``.
+    """
+    images = {key: value for key, value in dict(images or {}).items() if key != "shared_palette"}
+    prep = dict(
+        params,
+        quantize_type="NONE", finish_enabled=False, sprite_cleanup=False,
+        sprite_outline="NONE", preview_dither_mask=False, output_palette=False,
+        output_lut=False, output_default_lut=False, v3_palette_lock="OFF",
+    )
+    if str(params.get("dither_strategy", "OVERLAY")).upper() == "PALETTE_THRESHOLD":
+        # Threshold dithering chooses between palette colors; there is no
+        # palette yet, and the undithered colors are the right samples.
+        prep["dither_type"] = "NONE"
+    pooled = []
+    for frame in frames:
+        result = run_pipeline(frame, prep, images)
+        main = result["main"]
+        gw, gh = result["grid"]
+        samples = _palette_samples(
+            main[..., :3], downscale_nearest(main[..., :3], gw, gh), main[..., 3:4], params
+        )
+        if samples.shape[0] > samples_per_frame:
+            keep = np.linspace(0, samples.shape[0] - 1, samples_per_frame).astype(np.intp)
+            samples = samples[keep]
+        pooled.append(samples)
+    if not pooled:
+        raise PipelineError("a shared palette needs at least one frame")
+    return _generated_palette(np.concatenate(pooled, axis=0), params, images)
+
+
 def _builtin_palette(lut_name):
     kind, data = resolve_builtin(lut_name)
     if kind == "palette":
@@ -166,8 +217,7 @@ def _cube_lut(images, params):
 def _palette_for_threshold(pixelated, grid, alpha, params, images):
     qtype = params.get("quantize_type", "NONE")
     if qtype == "CUSTOM_PALETTE":
-        samples = _palette_samples(pixelated, grid, alpha, params)
-        return _generated_palette(samples, params, images)
+        return _generated_or_shared_palette(pixelated, grid, alpha, params, images)
     if qtype == "LUT":
         return _lut_palette(params, images)
     custom = images.get("custom_palette")
@@ -436,8 +486,7 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
 
     if "quantize" in active_stages and qtype == "CUSTOM_PALETTE":
         if palette_colors is None:
-            samples = _palette_samples(out, grid, alpha, params)
-            palette_colors = _generated_palette(samples, params, images)
+            palette_colors = _generated_or_shared_palette(out, grid, alpha, params, images)
         out, palette_indices = _palette_quantize(
             out, gw, gh, palette_colors, apply_mode, params, retain_palette_indices
         )
