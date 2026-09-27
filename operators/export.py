@@ -132,30 +132,95 @@ def _default_image_filepath(image, file_format):
     return _ensure_extension(stem, file_format)
 
 
+def set_still_format(image_settings, file_format):
+    """Select a still-image ``file_format`` on ImageFormatSettings.
+
+    Blender 5.x validates ``file_format`` against ``media_type``: a scene set
+    to video output accepts only FFMPEG, and multilayer EXR needs its own
+    media type.  Older versions have no ``media_type``.
+    """
+    if hasattr(image_settings, "media_type"):
+        image_settings.media_type = (
+            "MULTI_LAYER_IMAGE" if file_format == "OPEN_EXR_MULTILAYER" else "IMAGE"
+        )
+    image_settings.file_format = file_format
+
+
+def format_setting_names(image_settings, names):
+    """Settings to save and restore, with ``media_type`` first where it exists.
+
+    Restoring in this order lets a video-output scene get its media type back
+    before its FFMPEG ``file_format`` becomes valid again.
+    """
+    return (("media_type",) if hasattr(image_settings, "media_type") else ()) + tuple(names)
+
+
+_DEPTHS = ("8", "10", "12", "16", "32")
+_COLOR_MODE_FALLBACKS = {"RGBA": ("RGB", "BW"), "RGB": ("RGBA", "BW"), "BW": ("RGB", "RGBA")}
+
+
+def _set_supported(settings, name, candidates):
+    """Assign the first value the current file format accepts; return it or ``None``.
+
+    Which depths, color modes, and codecs are valid depends on the format
+    (EXR has no 8-bit, JPEG no alpha), and Blender rejects the rest.
+    """
+    for value in candidates:
+        try:
+            setattr(settings, name, value)
+        except (TypeError, ValueError):
+            continue
+        return value
+    return None
+
+
+def _nearest_depths(depth):
+    """``depth`` followed by the other bit depths, nearest first."""
+    wanted = int(depth)
+    return tuple(sorted(_DEPTHS, key=lambda value: (abs(int(value) - wanted), -int(value))))
+
+
 def _save_with_blender_settings(image, filepath, options, scene):
-    """Save with temporary scene output settings, restoring the scene afterward."""
+    """Save with temporary scene output settings, restoring the scene afterward.
+
+    Returns a list of ``"setting: requested -> used"`` notes for options the
+    chosen format does not support.
+    """
     settings = scene.render.image_settings
-    names = (
+    names = format_setting_names(settings, (
         "file_format", "color_mode", "color_depth", "quality", "compression",
         "exr_codec", "jpeg2k_codec", "tiff_codec", "use_preview",
         "color_management",
-    )
+    ))
     old = {name: getattr(settings, name) for name in names}
+    notes = []
+    file_format = options["format"]
+    if file_format == "OPEN_EXR_MULTILAYER":
+        # save_render writes render layers; a processed image is one flat
+        # layer, which Blender only saves this way as regular OpenEXR.
+        file_format = "OPEN_EXR"
+        notes.append("format: OpenEXR MultiLayer -> OpenEXR")
     try:
-        settings.file_format = options["format"]
-        settings.color_mode = options["color_mode"]
-        settings.color_depth = options["color_depth"]
+        set_still_format(settings, file_format)
+        for name, candidates in (
+            ("color_mode", (options["color_mode"],) + _COLOR_MODE_FALLBACKS[options["color_mode"]]),
+            ("color_depth", _nearest_depths(options["color_depth"])),
+        ):
+            used = _set_supported(settings, name, candidates)
+            if used is not None and used != candidates[0]:
+                notes.append(f"{name.replace('_', ' ')}: {candidates[0]} -> {used}")
         settings.quality = options["quality"]
         settings.compression = options["compression"]
-        settings.exr_codec = options["exr_codec"]
-        settings.jpeg2k_codec = options["jpeg2k_codec"]
-        settings.tiff_codec = options["tiff_codec"]
+        # Codecs only apply to their own formats; keep the default elsewhere.
+        for name in ("exr_codec", "jpeg2k_codec", "tiff_codec"):
+            _set_supported(settings, name, (options[name],))
         settings.use_preview = options["use_preview"]
         settings.color_management = "FOLLOW_SCENE"
         image.save_render(filepath, scene=scene, quality=options["quality"])
     finally:
         for name, value in old.items():
             setattr(settings, name, value)
+    return notes
 
 
 class PIXELATORPLUS_OT_export_output(bpy.types.Operator, ExportHelper):
@@ -249,8 +314,9 @@ class PIXELATORPLUS_OT_export_output(bpy.types.Operator, ExportHelper):
         image = bpy.data.images[s.last_output_name]
         filepath = _ensure_extension(self.filepath, self.export_format)
         try:
+            notes = []
             if self.export_mode == "BLENDER":
-                _save_with_blender_settings(image, filepath, {
+                notes = _save_with_blender_settings(image, filepath, {
                     "format": self.export_format,
                     "color_mode": self.color_mode,
                     "color_depth": self.color_depth,
@@ -266,6 +332,10 @@ class PIXELATORPLUS_OT_export_output(bpy.types.Operator, ExportHelper):
         except (OSError, RuntimeError, ValueError) as exc:
             self.report({"ERROR"}, f"Could not export image: {exc}")
             return {"CANCELLED"}
+        if notes:
+            self.report({"WARNING"}, f"Saved {filepath}; adjusted for this format: "
+                        + ", ".join(notes))
+            return {"FINISHED"}
         self.report({"INFO"}, f"Processed image saved to {filepath}")
         return {"FINISHED"}
 
