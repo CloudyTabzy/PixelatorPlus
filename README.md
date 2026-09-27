@@ -150,9 +150,11 @@ Making sprites? Load the **Game Sprite** recipe, render your model with
 **Film → Transparent** enabled, and use the render as the input. For an
 animation, press **Freeze Palette for Animation** on the first frame.
 
-Want deeper control? Expand the **Advanced (V3)** subpanel for the stage
-stack, palette workflow, `.cube` LUTs, and the full finishing stack. You can
-also save the whole setup as a restorable plan snapshot.
+The sidebar keeps the essentials (input, recipe, Apply, live preview) at
+the top. Below them, foldable **Pixels**, **Color**, **Dither**, **Sprite**,
+**Finish**, and **Output** sections show a one-line summary while folded, so
+you can see the whole setup at a glance. **Advanced** holds Palette Lock,
+Grid Coherence, the stage stack, and restorable plan snapshots.
 
 ## Credits and License
 

@@ -46,7 +46,7 @@ class PIXELATORPLUS_OT_snapshot_plan(bpy.types.Operator):
     """Normalize current flat settings and store a v3 plan in the scene."""
 
     bl_idname = "pixelatorplus.snapshot_plan"
-    bl_label = "Capture V3 Plan Snapshot"
+    bl_label = "Capture Plan Snapshot"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -60,7 +60,7 @@ class PIXELATORPLUS_OT_snapshot_plan(bpy.types.Operator):
         plan = normalize_plan(collect_snapshot_params(settings))
         settings.v3_plan_json = plan_to_json(plan)
         settings.v3_plan_fingerprint = plan_fingerprint(plan)
-        self.report({"INFO"}, f"Captured v3 plan {settings.v3_plan_fingerprint}")
+        self.report({"INFO"}, f"Captured plan {settings.v3_plan_fingerprint}")
         return {"FINISHED"}
 
 
@@ -68,7 +68,7 @@ class PIXELATORPLUS_OT_restore_plan(bpy.types.Operator):
     """Restore scalar settings from the stored v3 plan snapshot."""
 
     bl_idname = "pixelatorplus.restore_plan"
-    bl_label = "Restore V3 Plan Snapshot"
+    bl_label = "Restore Plan Snapshot"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -87,7 +87,7 @@ class PIXELATORPLUS_OT_restore_plan(bpy.types.Operator):
         except ValueError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
-        message = f"Restored v3 plan {settings.v3_plan_fingerprint}"
+        message = f"Restored plan {settings.v3_plan_fingerprint}"
         if skipped:
             message += f" ({len(skipped)} legacy value(s) skipped)"
         self.report({"INFO"}, message)

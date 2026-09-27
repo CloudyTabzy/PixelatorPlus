@@ -64,9 +64,9 @@ _DITHER_TYPES = [
 
 _BLEND_MODES = [
     ("OVERLAY", "Overlay", "Overlay blend in sRGB space"),
-    ("OVERLAY_LINEAR", "Overlay [Linear Space]", "Overlay blend in linear light"),
+    ("OVERLAY_LINEAR", "Overlay (Linear)", "Overlay blend in linear light"),
     ("SOFT_LIGHT", "Soft Light", "Soft-light blend in sRGB space"),
-    ("SOFT_LIGHT_LINEAR", "Soft Light [Linear Space]", "Soft-light blend in linear light"),
+    ("SOFT_LIGHT_LINEAR", "Soft Light (Linear)", "Soft-light blend in linear light"),
 ]
 
 _DITHER_STRATEGIES = [
@@ -97,11 +97,11 @@ _MASK_TYPES = [
 # v2.72 relabels the LUT quantize mode "Lookup Table / Palette"
 _QUANTIZE_TYPES = [
     ("NONE", "None", "No color quantization"),
-    ("CUSTOM_PALETTE", "Generate Custom Palette [Intensive]",
-     "K-means palette extraction in the chosen color space"),
-    ("PER_CHANNEL", "Per Channel [Naive Legacy]",
+    ("CUSTOM_PALETTE", "Generated Palette",
+     "Extract a palette from the image in the chosen color space (slower)"),
+    ("PER_CHANNEL", "Per Channel",
      "Reduce each channel to N colors / bits"),
-    ("LUT", "Lookup Table / Palette",
+    ("LUT", "Palette / LUT",
      "Snap to a built-in vintage palette, a custom 4K LUT, or a custom palette image"),
 ]
 
@@ -114,7 +114,7 @@ _INIT_MODES = [
 
 _COLOR_MODES = [
     ("RGB", "RGB", "Cluster in RGB"),
-    ("CIELAB", "CIELAB [Preserves Colors]", "Cluster in CIELAB (perceptual)"),
+    ("CIELAB", "CIELAB", "Cluster in CIELAB (perceptual)"),
     ("OKLAB", "Oklab", "Cluster in Oklab (perceptual)"),
 ]
 
@@ -382,7 +382,8 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         name="Blend Mode", default="SOFT_LIGHT", items=_BLEND_MODES, update=_mark_dirty,
     )
     use_gray_dither: BoolProperty(
-        name="Use Grayscale Dither [Uses Red Channel]", default=False, update=_mark_dirty,
+        name="Grayscale Dither", default=False, update=_mark_dirty,
+        description="Use the pattern's red channel as a grayscale dither",
     )
     dither_strength: FloatProperty(
         name="Blend Strength", default=0.25, min=0.0, max=1.0, subtype="FACTOR",
@@ -448,7 +449,8 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         description="Soften the final dither mask by this many pixels (0 = off)",
     )
     show_mask_controls: BoolProperty(
-        name="Show Mask Threshold Weights", default=False, update=_mark_dirty,
+        name="Frequency Weights", default=False, update=_mark_dirty,
+        description="Show per-frequency weights for the edge and flat masks",
     )
     huge: FloatProperty(name="Huge", default=1.0, min=0.0, max=1.0, update=_mark_dirty)
     big: FloatProperty(name="Big", default=1.0, min=0.0, max=1.0, update=_mark_dirty)
@@ -535,12 +537,14 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         description="Palette initial-color strategy",
     )
     color_mode: EnumProperty(
-        name="Palette Creation Color Space", default="RGB", items=_COLOR_MODES,
+        name="Build Space", default="RGB", items=_COLOR_MODES,
         update=_mark_dirty,
+        description="Color space in which the palette is generated",
     )
     apply_palette_mode: EnumProperty(
-        name="Palette Apply Color Space", default="RGB", items=_APPLY_MODES,
+        name="Match Space", default="RGB", items=_APPLY_MODES,
         update=_mark_dirty,
+        description="Color space used to match each pixel to its nearest palette color",
     )
     quantize_quality: IntProperty(
         name="Quality", default=2, min=0, max=8, update=_mark_dirty,
@@ -563,8 +567,8 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         description="Enable the Color Importance palette weighting control",
     )
     use_pixelated_for_quantize: BoolProperty(
-        name="Use Pixelated Texture for Quantizing", default=False, update=_mark_dirty,
-        description="v2.5: build the palette from the downscaled pixel grid",
+        name="Sample Pixel Grid", default=False, update=_mark_dirty,
+        description="Build the palette from the downscaled pixel grid instead of the full image",
     )
     palette_extract_method: EnumProperty(
         name="Palette Extraction", default="KMEANS", items=_PALETTE_EXTRACT_METHODS,
@@ -595,8 +599,9 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         name="Number of Colors", default=32, min=2, max=256, update=_mark_dirty,
     )
     gamma: FloatProperty(
-        name="Gamma Adjust [Helps Preserve Dark Range]", default=1.0, min=0.1, max=4.0,
+        name="Palette Gamma", default=1.0, min=0.1, max=4.0,
         update=_mark_dirty,
+        description="Gamma applied before palette generation; raise it to preserve dark tones",
     )
     force_colors: EnumProperty(
         name="Force Colors", default="NONE", items=_FORCE_COLORS, update=_mark_dirty,
@@ -606,7 +611,7 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         description="Also produce a palette swatch image on Apply",
     )
     output_lut: BoolProperty(
-        name="Output Palette to LUT [Must be 4K]", default=False,
+        name="Output Palette LUT", default=False,
         description="Also produce a 4096x4096 LUT image of the palette on Apply (slow)",
     )
     use_range_adaptive: BoolProperty(
@@ -626,7 +631,7 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         name="Bits Per Channel", default=8, min=1, max=8, update=_mark_dirty,
     )
     output_default_lut: BoolProperty(
-        name="Output the Default LUT [MUST be 4K]", default=False,
+        name="Output Identity LUT", default=False,
         description="Also produce the identity 4096x4096 LUT on Apply",
     )
     lut: EnumProperty(
