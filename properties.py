@@ -12,6 +12,7 @@ from bpy.props import (
     BoolProperty,
     EnumProperty,
     FloatProperty,
+    FloatVectorProperty,
     IntProperty,
     IntVectorProperty,
     CollectionProperty,
@@ -20,6 +21,16 @@ from bpy.props import (
 )
 
 from .presets import PRESET_ITEMS
+
+
+# collect_params() resolves "//" paths itself.  Newer Blender versions warn
+# unless a path property declares that; older ones reject the unknown option
+# at registration, so the option is feature-tested.
+_BLEND_RELATIVE_PATH_OPTIONS = {"ANIMATABLE"} | (
+    {"PATH_SUPPORTS_BLEND_RELATIVE"}
+    if "is_path_supports_blend_relative" in bpy.types.Property.bl_rna.properties
+    else set()
+)
 
 
 def _mark_dirty(self, context):
@@ -208,6 +219,7 @@ V3_STAGE_ITEMS = [
     ("posterize", "Posterize / Levels", "Apply explicit per-channel levels"),
     ("dither", "Dither", "Apply an ordered/noise/palette threshold pattern"),
     ("quantize", "Quantize", "Apply palette, LUT, or per-channel reduction"),
+    ("sprite", "Sprite Cleanup / Outline", "Remove stray cells and outline the silhouette"),
     ("display_finish", "Display Finish", "Apply the optional CRT/display finish stack"),
 ]
 
@@ -622,6 +634,7 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
     )
     cube_lut_path: StringProperty(
         name=".cube LUT File", default="", subtype="FILE_PATH", update=_mark_dirty,
+        options=_BLEND_RELATIVE_PATH_OPTIONS,
         description="Path to a portable 3D .cube LUT",
     )
     cube_lut_interpolation: EnumProperty(
@@ -634,6 +647,53 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
     cube_lut_strength: FloatProperty(
         name=".cube Strength", default=1.0, min=0.0, max=1.0,
         subtype="FACTOR", update=_mark_dirty,
+    )
+
+    # -- Sprite (add-on extra, PixelatorPlus-native) --------------------------
+    sprite_cleanup: BoolProperty(
+        name="Remove Stray Pixels", default=False, update=_mark_dirty,
+        description="Replace isolated cells with the color their neighbors agree on",
+    )
+    sprite_cleanup_agreement: IntProperty(
+        name="Neighbor Agreement", default=3, min=2, max=4, update=_mark_dirty,
+        description="How many of a stray cell's four neighbors must share a color "
+        "before it is replaced (4 = only fully surrounded cells)",
+    )
+    sprite_outline: EnumProperty(
+        name="Outline", default="NONE", update=_mark_dirty,
+        description="Draw a one-cell outline around transparent-background silhouettes",
+        items=[
+            ("NONE", "None", "No outline"),
+            ("OUTSIDE", "Outside", "Fill empty cells around the silhouette"),
+            ("INSIDE", "Inside", "Recolor the silhouette's own edge cells"),
+        ],
+    )
+    sprite_outline_color_mode: EnumProperty(
+        name="Outline Color", default="SELECTIVE", update=_mark_dirty,
+        items=[
+            ("SELECTIVE", "Selective", "Darken the neighboring sprite color (pixel-art sel-out)"),
+            ("DARKEST", "Darkest Palette Color", "Use the darkest color of the active palette"),
+            ("CUSTOM", "Custom", "Use a fixed outline color"),
+        ],
+    )
+    sprite_outline_color: FloatVectorProperty(
+        name="Outline Color", size=3, default=(0.05, 0.05, 0.08), min=0.0, max=1.0,
+        subtype="COLOR_GAMMA", update=_mark_dirty,
+        description="Fixed outline color (snapped to the palette when one is active)",
+    )
+    sprite_outline_darken: FloatProperty(
+        name="Darken", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
+        update=_mark_dirty,
+        description="How much darker than the sprite a selective outline is",
+    )
+    sprite_outline_corners: BoolProperty(
+        name="Outline Corners", default=False, update=_mark_dirty,
+        description="Also outline diagonal neighbors for a heavier, rounder outline",
+    )
+    sprite_alpha_threshold: FloatProperty(
+        name="Opacity Threshold", default=0.5, min=0.01, max=1.0, subtype="FACTOR",
+        update=_mark_dirty,
+        description="Cells at least this opaque count as part of the sprite",
     )
 
     # -- Display finishing --------------------------------------------------
@@ -690,6 +750,12 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         name="Preview Max Size", default=512, min=64, max=1024, update=_mark_dirty,
         description="Longest-side cap for the live preview",
     )
+    # Written by the preview timer, shown in the panel; not user settings.
+    preview_status: StringProperty(
+        name="Preview Status", default="", options={"HIDDEN"},
+        description="Why the live preview is approximate or out of date",
+    )
+    preview_failed: BoolProperty(name="Preview Failed", default=False, options={"HIDDEN"})
     preview_cache_enabled: BoolProperty(
         name="Cache Live Preview", default=True, update=_mark_dirty,
         description="Reuse identical preview results without starting a worker thread",
@@ -788,8 +854,12 @@ def collect_snapshot_params(settings):
         "finish_scanline_axis", "finish_scanline_invert", "finish_vignette_strength",
         "finish_vignette_roundness", "finish_chromatic_aberration", "finish_mask_type",
         "finish_mask_mix", "finish_mask_invert", "finish_channel_mask",
+        "sprite_cleanup", "sprite_cleanup_agreement", "sprite_outline",
+        "sprite_outline_color_mode", "sprite_outline_darken", "sprite_outline_corners",
+        "sprite_alpha_threshold",
     )
     params = {k: getattr(settings, k) for k in keys}
+    params["sprite_outline_color"] = tuple(settings.sprite_outline_color)
     # Parameter collection runs from preview and Apply paths.  It must report
     # an existing stage policy without initializing the collection or forcing
     # a disabled flag back on; operators and presets explicitly initialize
@@ -819,6 +889,10 @@ def collect_params(settings):
     params["chroma_importance"] = (
         settings.chroma_importance if settings.use_chroma_importance else None
     )
+    # Blender stores FILE_PATH values relative to the .blend ("//...") by
+    # default; the core opens plain filesystem paths.
+    if settings.cube_lut_path:
+        params["cube_lut_path"] = bpy.path.abspath(settings.cube_lut_path)
     return params
 
 

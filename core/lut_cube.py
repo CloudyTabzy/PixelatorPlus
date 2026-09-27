@@ -158,11 +158,26 @@ def parse_cube(text):
     return CubeLUT(size, data, domain_min, domain_max, title)
 
 
+def file_stamp(path):
+    """Return ``(absolute path, mtime_ns, size)`` identifying a file's content.
+
+    Used as the parsed-LUT cache key and by preview caching, so editing a
+    `.cube` file in place is noticed.  Returns ``None`` for a missing file.
+    """
+    path = os.path.abspath(os.fspath(path))
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (path, getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9)), stat.st_size)
+
+
 def load_cube(path):
     """Read and parse a user-selected `.cube` path."""
-    path = os.path.abspath(os.fspath(path))
-    stat = os.stat(path)
-    key = (path, getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9)), stat.st_size)
+    key = file_stamp(path)
+    if key is None:
+        raise FileNotFoundError(f"no such .cube file: {os.fspath(path)}")
+    path = key[0]
     cached = _CUBE_CACHE.get(key)
     if cached is not None:
         _CUBE_CACHE.move_to_end(key)

@@ -15,9 +15,9 @@ external app, or internet connection required.
 
 ## Why PixelatorPlus?
 
-- **Instant retro looks.** Fifteen one-click **Style Recipes**, from *1-Bit
+- **Instant retro looks.** Sixteen one-click **Style Recipes**, from *1-Bit
   Ink* and *Handheld 4-Tone* to *Demoscene 32*, *Newsprint Halftone*, and
-  *Glitchpunk RGB*. Every recipe stays fully editable.
+  *Game Sprite*. Every recipe stays fully editable.
 - **Feeling stuck? Press Surprise Me.** It picks a recipe and tastefully
   varies the resolution, dither, palette, and seed. It's a quick way to find a
   look you wouldn't have dialed in yourself.
@@ -25,6 +25,11 @@ external app, or internet connection required.
   Apple II, Atari 2600, Master System, ZX Spectrum, CGA/EGA, MSX, PICO-8,
   DawnBringer 32, Resurrect 64, Endesga, and more. You can also generate a
   palette from your own image.
+- **From 3D render to game sprite.** Render your model with a transparent
+  background, then let PixelatorPlus clean up stray pixels and draw a crisp
+  one-pixel outline, just like a pixel artist would.
+- **Animation without flicker.** **Freeze Palette** locks the colors of one
+  frame so every other frame uses exactly the same palette.
 - **Pixel art that stays pixel art.** Unique **Palette Lock** and **Grid
   Coherence** controls keep finishing effects from smearing your palette or
   breaking the pixel grid.
@@ -64,6 +69,8 @@ external app, or internet connection required.
 - **Generate Custom Palette** extracts 2–256 colors with k-means (in RGB,
   CIELAB, or Oklab), frequency, or exact-color extraction. Palettes can be
   sorted, shifted, trimmed, or swapped against another palette.
+- **Freeze Palette for Animation** saves the generated palette as an image
+  and switches to it, so later frames and renders never drift.
 - **Built-in palettes and reducers** cover dozens of classic machines and
   fantasy consoles, plus grayscale ramps.
 - **Error diffusion** with Floyd–Steinberg, Atkinson, Sierra Lite,
@@ -73,6 +80,17 @@ external app, or internet connection required.
   gamma, and per-channel control.
 - **LUTs everywhere**: use standard `.cube` 3D LUTs or 4K image LUTs, and
   export your palette as a `.cube` or 4K LUT for use in other apps.
+
+### Sprite
+
+- **Remove Stray Pixels** replaces isolated specks with the color their
+  neighbors agree on. It also fills one-pixel holes, while one-pixel-wide
+  lines stay intact.
+- **Outline** draws a one-pixel border **Outside** the silhouette or along
+  its **Inside** edge. Choose a **Selective** outline (a darker shade of the
+  neighboring color, the classic pixel-art "sel-out"), the **Darkest** palette
+  color, or a **Custom** color. Outlines stay on your palette.
+- **Outline Corners** adds diagonal pixels for a heavier, rounder look.
 
 ### Finish
 
@@ -127,6 +145,10 @@ Requires **Blender 4.2 or newer**. Tested on Blender 5.2 LTS.
 4. Turn on **Live Preview** and tweak the settings until it feels right.
 5. Press **Apply PixelatorPlus**. Your result appears as
    `<image name> [PixelatorPlus]`, and repeat runs update that same image.
+
+Making sprites? Load the **Game Sprite** recipe, render your model with
+**Film → Transparent** enabled, and use the render as the input. For an
+animation, press **Freeze Palette for Animation** on the first frame.
 
 Want deeper control? Expand the **Advanced (V3)** subpanel for the stage
 stack, palette workflow, `.cube` LUTs, and the full finishing stack. You can

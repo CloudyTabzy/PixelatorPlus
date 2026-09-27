@@ -13,6 +13,8 @@ import json
 
 import numpy as np
 
+from .lut_cube import CubeLUT
+
 
 def _jsonable(value):
     if isinstance(value, np.ndarray):
@@ -25,7 +27,14 @@ def _jsonable(value):
         return value.item()
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    return repr(value)
+    if isinstance(value, CubeLUT):
+        # Content, not identity: an equal copy shares a key and an edited
+        # LUT gets a new one.
+        return {
+            "cube_lut": array_digest(value.data),
+            "domain": [value.domain_min.tolist(), value.domain_max.tolist()],
+        }
+    raise TypeError(f"cannot fingerprint {type(value).__name__} for the preview cache")
 
 
 def array_digest(array):
@@ -38,14 +47,20 @@ def array_digest(array):
     return digest.hexdigest()
 
 
-def preview_key(source, params, images=None, mode="FINAL"):
-    """Build a content key for a preview result."""
+def preview_key(source, params, images=None, mode="FINAL", resources=None):
+    """Build a content key for a preview result.
+
+    ``resources`` identifies external inputs that ``params`` only reference
+    by name, such as a `.cube` file's :func:`lut_cube.file_stamp`.
+    """
     payload = {
         "source": {"shape": tuple(np.asarray(source).shape), "sha1": array_digest(source)},
         "params": _jsonable(params),
         "images": {key: _jsonable(value) for key, value in sorted((images or {}).items())},
         "mode": str(mode),
     }
+    if resources:
+        payload["resources"] = _jsonable(resources)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha1(encoded).hexdigest()
 

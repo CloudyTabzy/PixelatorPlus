@@ -1,6 +1,10 @@
-from . import apply, assets, export, hybrid, material, plan, presets, render_result, utility
+from . import (
+    apply, assets, export, hybrid, material, palette, plan, presets, render_result, utility,
+)
 
-_modules = (apply, assets, export, hybrid, material, plan, presets, render_result, utility)
+_modules = (
+    apply, assets, export, hybrid, material, palette, plan, presets, render_result, utility,
+)
 
 
 def register():

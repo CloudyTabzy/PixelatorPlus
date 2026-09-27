@@ -23,6 +23,7 @@ STAGE_SPECS = {
     "dither": {"cost": "MEDIUM", "draft": True},
     "diffusion": {"cost": "HIGH", "draft": False},
     "quantize": {"cost": "HIGH", "draft": False},
+    "sprite": {"cost": "LOW", "draft": True},
     "display_finish": {"cost": "MEDIUM", "draft": True},
 }
 

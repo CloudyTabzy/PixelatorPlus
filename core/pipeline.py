@@ -2,11 +2,12 @@
 
 The executor remains compatible with the v2 flat settings dictionary while
 supporting palette-aware dithering, expanded diffusion, `.cube` LUTs,
-pixel-art scaling, and a deterministic display-finish stack.  V3 makes the
-dependency order explicit (pixelate -> posterize -> dither -> quantize ->
-finish), allows each stage to be disabled through the canonical stage stack,
-and adds PixelatorPlus-native palette-lock and grid-coherence policies without
-copying another compositor's node runtime.
+pixel-art scaling, sprite cleanup and outlines, and a deterministic
+display-finish stack.  V3 makes the dependency order explicit (pixelate ->
+posterize -> dither -> quantize -> sprite -> finish), allows each stage to be
+disabled through the canonical stage stack, and adds PixelatorPlus-native
+palette-lock and grid-coherence policies without copying another compositor's
+node runtime.
 """
 
 import numpy as np
@@ -18,6 +19,7 @@ from . import lut_cube as lut_cube_mod
 from . import palette as palette_mod
 from . import posterize as posterize_mod
 from . import quantize as quantize_mod
+from . import sprite as sprite_mod
 from .palettes import resolve as resolve_builtin
 from .plan import normalize_plan, plan_to_params, stage_types
 from .pixelate import (
@@ -356,7 +358,7 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
             return {
                 "main": main.astype(np.float32), "palette_colors": None,
                 "palette": None, "palette_index": None, "lut": None,
-                "grid": (gw, gh), "plan": plan,
+                "grid": (gw, gh), "plan": plan, "source_palette_colors": None,
             }
         if dither_strategy == "PALETTE_THRESHOLD":
             palette_colors = _palette_for_threshold(pixelated, grid, params, images)
@@ -459,14 +461,30 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
         if params.get("output_default_lut", False):
             lut_img = lut_mod.identity_lut()
 
+    _checkpoint(progress, cancel, 0.75, "quantize")
+
+    # -- 5. Sprite cleanup / outline ---------------------------------------
+    if "sprite" in active_stages:
+        sprite_palette = (
+            palette_colors
+            if palette_colors is not None and palette_colors.shape[0] <= 256 else None
+        )
+        out, alpha = sprite_mod.apply_sprite_stage(out, alpha, gw, gh, params, sprite_palette)
+        # Changed cells invalidate the quantizer's index buffer; it is
+        # recovered below only if the result is still palette-exact.
+        palette_indices = None
+
     # Diffusion and threshold dithering already emit palette colors, but their
     # quantizers do not expose indices.  Recover an index buffer now, before
     # any finish effect, only if it faithfully reproduces those colors.
     if retain_palette_indices and palette_indices is None and palette_colors is not None:
         palette_indices = _palette_indices_for_exact_output(out, palette_colors, apply_mode)
-    _checkpoint(progress, cancel, 0.8, "quantize")
+    # The palette as quantized, before Palette Tint restyles it.  Freezing a
+    # palette for animation reuses this, so tinting is never applied twice.
+    source_palette_colors = palette_colors
+    _checkpoint(progress, cancel, 0.8, "sprite")
 
-    # -- 5. Display finish --------------------------------------------------
+    # -- 6. Display finish --------------------------------------------------
     lock_palette = (
         palette_colors if palette_colors is not None and palette_colors.shape[0] <= 256 else None
     )
@@ -519,7 +537,7 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
         )
         out = rgba[..., :3]
 
-    # -- 6. V3 pixel-grid coherence and palette identity -------------------
+    # -- 7. V3 pixel-grid coherence and palette identity -------------------
     if params.get("v3_grid_coherence", "OFF") == "FINAL_CELL":
         out = upscale_nearest(downscale_area(out, gw, gh), w, h)
     if lock_mode == "SNAP_BACK" and lock_palette is not None:
@@ -549,6 +567,7 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
     return {
         "main": main,
         "palette_colors": palette_colors,
+        "source_palette_colors": source_palette_colors,
         "palette": palette_img,
         "palette_index": palette_index_img,
         "lut": lut_img,

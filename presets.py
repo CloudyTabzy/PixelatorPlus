@@ -116,6 +116,14 @@ EFFECT_BASELINE = {
     "finish_mask_mix": 1.0,
     "finish_mask_invert": False,
     "finish_channel_mask": "RGB",
+    "sprite_cleanup": False,
+    "sprite_cleanup_agreement": 3,
+    "sprite_outline": "NONE",
+    "sprite_outline_color_mode": "SELECTIVE",
+    "sprite_outline_color": (0.05, 0.05, 0.08),
+    "sprite_outline_darken": 0.5,
+    "sprite_outline_corners": False,
+    "sprite_alpha_threshold": 0.5,
 }
 
 
@@ -382,6 +390,26 @@ PRESETS = (
             "quantize_type": "LUT",
             "apply_palette_mode": "CIELAB",
             "lut": "DB32",
+        },
+    },
+    {
+        "id": "GAME_SPRITE",
+        "name": "Game Sprite",
+        "description": "Turn a transparent render into a clean, outlined 16-color game sprite",
+        "values": {
+            "square_pixel_count": 64,
+            "downscale_mode": "NEAREST_SOFTER",
+            "quantize_type": "CUSTOM_PALETTE",
+            "initialize_mode": "2",
+            "color_mode": "OKLAB",
+            "apply_palette_mode": "OKLAB",
+            "quantize_quality": 3,
+            "k_num_colors": 16,
+            "use_pixelated_for_quantize": True,
+            "sprite_cleanup": True,
+            "sprite_outline": "OUTSIDE",
+            "sprite_outline_color_mode": "SELECTIVE",
+            "sprite_outline_darken": 0.55,
         },
     },
 )

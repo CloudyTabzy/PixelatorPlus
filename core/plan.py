@@ -14,7 +14,8 @@ import json
 import math
 
 
-PLAN_SCHEMA_VERSION = 4
+# Schema 5 adds the ``sprite`` stage; schema 1-4 plans remain readable.
+PLAN_SCHEMA_VERSION = 5
 PLAN_FORMAT = "PixelatorPlus Plan"
 _KNOWN_STAGES = {
     "pre_adjust",
@@ -24,11 +25,12 @@ _KNOWN_STAGES = {
     "dither",
     "diffusion",
     "quantize",
+    "sprite",
     "display_finish",
 }
 _CANONICAL_STAGE_ORDER = (
     "pre_adjust", "pixelate", "posterize", "palette", "dither",
-    "diffusion", "quantize", "display_finish",
+    "diffusion", "quantize", "sprite", "display_finish",
 )
 _V3_PALETTE_LOCKS = {"OFF", "SNAP_BACK", "PALETTE_TINT"}
 _V3_GRID_COHERENCE = {"OFF", "DITHER_CELL", "FINAL_CELL"}
@@ -106,6 +108,13 @@ def legacy_to_plan(params):
                 ),
             )
         )
+    sprite_keys = (
+        "sprite_cleanup", "sprite_cleanup_agreement", "sprite_outline",
+        "sprite_outline_color_mode", "sprite_outline_color", "sprite_outline_darken",
+        "sprite_outline_corners", "sprite_alpha_threshold",
+    )
+    if params.get("sprite_cleanup", False) or params.get("sprite_outline", "NONE") != "NONE":
+        stages.append(_stage("sprite", params, sprite_keys))
     finish_keys = (
         "finish_enabled", "finish_brightness", "finish_contrast", "finish_exposure",
         "finish_saturation", "finish_grain", "finish_grain_brightness",
@@ -120,21 +129,14 @@ def legacy_to_plan(params):
     stage_enabled = params.get("v3_stage_enabled", {})
     if not isinstance(stage_enabled, dict):
         stage_enabled = {}
-    if stage_order:
-        by_type = {stage["type"]: stage for stage in stages}
-        ordered = []
-        for stage_type in stage_order:
-            stage = by_type.pop(stage_type, None)
-            if stage is not None:
-                stage["enabled"] = bool(stage_enabled.get(stage_type, True))
-                ordered.append(stage)
-        # Keep a valid plan if a future UI removed a stage from its collection.
-        ordered.extend(by_type.values())
-        stages = ordered
-    elif stage_enabled:
-        for stage in stages:
-            if stage["type"] in stage_enabled:
-                stage["enabled"] = bool(stage_enabled[stage["type"]])
+    # Stages are always emitted in dependency order; the UI stack only
+    # contributes enable flags.  A stack saved before a stage existed (or a
+    # reordered one) therefore cannot produce an invalid plan.  Stages the
+    # stack does not list stay enabled.
+    listed = set(stage_order or ()) | set(stage_enabled)
+    for stage in stages:
+        if stage["type"] in listed:
+            stage["enabled"] = bool(stage_enabled.get(stage["type"], True))
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
         "stages": stages,

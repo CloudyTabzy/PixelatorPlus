@@ -35,6 +35,8 @@ def _draw(layout, context):
         row.prop(s, "preview_max_size", text="Max")
         row.prop(s, "preview_cache_enabled", text="Cache")
         layout.prop(s, "preview_mode")
+        if s.preview_status:
+            layout.label(text=s.preview_status, icon="ERROR" if s.preview_failed else "INFO")
 
     layout.operator("pixelatorplus.apply", icon="IMAGE_DATA")
     if s.last_output_name:
@@ -164,6 +166,8 @@ def _draw(layout, context):
         box.prop(s, "output_lut")
         if s.output_lut:
             box.label(text="4K LUT generation uses substantial memory.", icon="INFO")
+        box.operator("pixelatorplus.freeze_palette", text="Freeze Palette for Animation",
+                     icon="FREEZE")
     elif qt == "PER_CHANNEL":
         box.prop(s, "use_range_adaptive")
         box.prop(s, "quantize_colors_or_bits")
@@ -192,6 +196,23 @@ def _draw(layout, context):
             box.prop(s, "diffusion_strength", slider=True)
             box.prop(s, "diffusion_serpentine")
             box.label(text="Diffusion snaps at pixel-grid resolution.", icon="INFO")
+
+    # -- Sprite --------------------------------------------------------------
+    box = layout.box()
+    box.label(text="Sprite", icon="OUTLINER_OB_GREASEPENCIL")
+    box.prop(s, "sprite_cleanup")
+    if s.sprite_cleanup:
+        box.prop(s, "sprite_cleanup_agreement")
+    box.prop(s, "sprite_outline")
+    if s.sprite_outline != "NONE":
+        box.prop(s, "sprite_outline_color_mode")
+        if s.sprite_outline_color_mode == "CUSTOM":
+            box.prop(s, "sprite_outline_color", text="")
+        elif s.sprite_outline_color_mode == "SELECTIVE":
+            box.prop(s, "sprite_outline_darken", slider=True)
+        box.prop(s, "sprite_outline_corners")
+        box.prop(s, "sprite_alpha_threshold", slider=True)
+        box.label(text="Outlines follow transparency (Film > Transparent).", icon="INFO")
 
     # -- Display finishing --------------------------------------------------
     box = layout.box()
@@ -244,8 +265,9 @@ def _draw_stage_stack(layout, stack):
             layout.label(text="All stages are active.", icon="CHECKMARK")
             layout.operator("pixelatorplus.init_stage_stack", icon="ADD")
         else:
-            # Files saved before a stage existed have an incomplete stack.
-            layout.label(text="The stage stack is incomplete.", icon="ERROR")
+            # Files saved before a stage existed have an incomplete stack;
+            # the missing stages still run until the stack is repaired.
+            layout.label(text="This file predates newer stages.", icon="INFO")
             layout.operator("pixelatorplus.init_stage_stack", text="Repair Stage Stack",
                             icon="FILE_REFRESH")
         return
