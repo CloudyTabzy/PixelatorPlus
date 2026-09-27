@@ -47,19 +47,64 @@ def _compositor_tree(scene):
     return tree
 
 
+def _existing_compositor_tree(scene):
+    """The scene's compositor tree, or ``None``; never creates one."""
+    return getattr(scene, "compositing_node_group", None) or getattr(scene, "node_tree", None)
+
+
+def _baked_nodes(tree):
+    return [node for node in tree.nodes if node.get(BAKED_NODE_FLAG)]
+
+
 def baked_output_drives_compositor(scene):
     """True when the static baked Image node is linked into the compositor.
 
     Renders then return that fixed image for every frame, so frame-by-frame
     work (sprite sheets) must bypass compositing.  Never creates a tree.
     """
-    tree = getattr(scene, "compositing_node_group", None) or getattr(scene, "node_tree", None)
+    tree = _existing_compositor_tree(scene)
     if tree is None:
         return False
-    return any(
-        node.get(BAKED_NODE_FLAG) and any(output.links for output in node.outputs)
-        for node in tree.nodes
-    )
+    return any(any(output.links for output in node.outputs) for node in _baked_nodes(tree))
+
+
+# Links from the baked Image node lifted for the render in progress, per
+# scene: (baked node name, output index, target node name, input index).
+_lifted_links = {}
+
+
+def _lift_baked_links(scene):
+    """Disconnect the baked node for one render, remembering its links.
+
+    A connected baked node is a static image: left in place, it would feed
+    the previous bake into the new render instead of the fresh pixels.
+    """
+    tree = _existing_compositor_tree(scene)
+    if tree is None:
+        return
+    lifted = []
+    for node in _baked_nodes(tree):
+        for out_index, output in enumerate(node.outputs):
+            for link in tuple(output.links):
+                target = link.to_node
+                in_index = next(i for i, socket in enumerate(target.inputs)
+                                if socket == link.to_socket)
+                lifted.append((node.name, out_index, target.name, in_index))
+                tree.links.remove(link)
+    if lifted:
+        _lifted_links[scene.name] = lifted
+
+
+def _restore_baked_links(scene):
+    """Reconnect links lifted by :func:`_lift_baked_links` (no-op otherwise)."""
+    lifted = _lifted_links.pop(scene.name, None)
+    tree = _existing_compositor_tree(scene)
+    if not lifted or tree is None:
+        return
+    for node_name, out_index, target_name, in_index in lifted:
+        node, target = tree.nodes.get(node_name), tree.nodes.get(target_name)
+        if node is not None and target is not None:
+            tree.links.new(node.outputs[out_index], target.inputs[in_index])
 
 
 def _baked_output_node(scene, image):
@@ -154,9 +199,38 @@ def bake_render_result_to_compositor(scene, connect=False):
     return output, result, node
 
 
+def _auto_connecting(scene):
+    settings = getattr(scene, "pixelatorplus", None)
+    return bool(settings and settings.auto_bake_render and settings.auto_connect_baked_output)
+
+
+@persistent
+def _render_init(scene):
+    """Keep an auto-connected previous bake out of the render that starts now."""
+    if not _auto_connecting(scene):
+        return
+    try:
+        _lift_baked_links(scene)
+    except Exception as exc:
+        # A render handler must never raise into Blender's render pipeline.
+        print(f"PixelatorPlus could not detach the baked output: {exc}")
+
+
+@persistent
+def _render_cancel(scene):
+    try:
+        _restore_baked_links(scene)
+    except Exception as exc:
+        print(f"PixelatorPlus could not reconnect the baked output: {exc}")
+
+
 @persistent
 def _render_complete(scene):
     """Optional final-quality bake after Blender finishes a render."""
+    try:
+        _restore_baked_links(scene)
+    except Exception as exc:
+        print(f"PixelatorPlus could not reconnect the baked output: {exc}")
     settings = getattr(scene, "pixelatorplus", None)
     if settings is None or not settings.auto_bake_render:
         return
@@ -245,13 +319,25 @@ classes = (
 _register_classes, _unregister_classes = bpy.utils.register_classes_factory(classes)
 
 
+_HANDLERS = (
+    ("render_init", _render_init),
+    ("render_cancel", _render_cancel),
+    ("render_complete", _render_complete),
+)
+
+
 def register():
     _register_classes()
-    if _render_complete not in bpy.app.handlers.render_complete:
-        bpy.app.handlers.render_complete.append(_render_complete)
+    for name, handler in _HANDLERS:
+        handlers = getattr(bpy.app.handlers, name)
+        if handler not in handlers:
+            handlers.append(handler)
 
 
 def unregister():
-    if _render_complete in bpy.app.handlers.render_complete:
-        bpy.app.handlers.render_complete.remove(_render_complete)
+    for name, handler in _HANDLERS:
+        handlers = getattr(bpy.app.handlers, name)
+        if handler in handlers:
+            handlers.remove(handler)
+    _lifted_links.clear()
     _unregister_classes()

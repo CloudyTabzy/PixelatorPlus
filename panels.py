@@ -471,6 +471,8 @@ def _draw_compositor(layout, s):
                  icon="LINKED")
     body.prop(s, "auto_bake_render")
     if s.auto_bake_render:
+        body.label(text="Bakes a render's last frame; use Sprite Sheet for animation.",
+                   icon="INFO")
         body.prop(s, "auto_connect_baked_output")
         if s.auto_connect_baked_output:
             body.label(text="Replaces the compositor output link after each render.",
