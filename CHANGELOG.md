@@ -6,6 +6,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.2.0] - 2026-09-28
+
+### Changed
+
+- Redesigned sidebar. The essentials (input, recipe, Apply, and live
+  preview) stay at the top; everything else lives in foldable **Pixels**,
+  **Color**, **Dither**, **Sprite**, **Finish**, **Output**, **Advanced**,
+  and (in the Compositor) **Compositor** sections. Folded sections show a
+  summary such as `64 × 48 cells`, `Bayer`, or `Outline + Cleanup`;
+  Posterize and Finish have header toggles. Labels use Blender's standard
+  two-column layout.
+- The separate **Advanced (V3)** sub-panels are gone. They repeated 43 main
+  panel controls; their unique controls now live in the **Advanced** section.
+- Controls that have no effect in the current mode are hidden (for example,
+  blend mode and saturation in Palette Threshold dithering, or the match
+  space for `.cube` LUTs).
+- Plainer labels: *Generated Palette*, *Per Channel*, *Palette / LUT*,
+  *Grayscale Dither*, *Palette Gamma*, *Sample Pixel Grid*, *Build Space* /
+  *Match Space*, *Output Palette LUT*, *Output Identity LUT*, and *Capture /
+  Restore Plan Snapshot*. Setting identifiers, saved files, and presets are
+  unchanged.
+
+### Fixed
+
+- Generated palettes ignore fully transparent pixels, so a render's empty
+  background no longer costs a palette entry or becomes the forced darkest
+  color. Opaque images produce the same palettes as before.
+
 ## [3.1.0] - 2026-09-28
 
 ### Added
