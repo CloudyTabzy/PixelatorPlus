@@ -157,7 +157,8 @@ def build_shared_palette(frames, params, images=None, samples_per_frame=65536):
     prep = dict(
         params,
         quantize_type="NONE", finish_enabled=False, sprite_cleanup=False,
-        sprite_outline="NONE", preview_dither_mask=False, output_palette=False,
+        sprite_outline="NONE", sprite_part_lines=False, preview_dither_mask=False,
+        output_palette=False,
         output_lut=False, output_default_lut=False, v3_palette_lock="OFF",
     )
     if str(params.get("dither_strategy", "OVERLAY")).upper() == "PALETTE_THRESHOLD":
@@ -542,7 +543,11 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
             palette_colors
             if palette_colors is not None and palette_colors.shape[0] <= 256 else None
         )
-        out, alpha = sprite_mod.apply_sprite_stage(out, alpha, gw, gh, params, sprite_palette)
+        if params.get("sprite_part_lines", False) and images.get("id_map") is None:
+            raise PipelineError("Part Lines need an ID map image (use Render ID Map)")
+        out, alpha = sprite_mod.apply_sprite_stage(
+            out, alpha, gw, gh, params, sprite_palette, images.get("id_map")
+        )
         # Changed cells invalidate the quantizer's index buffer; it is
         # recovered below only if the result is still palette-exact.
         palette_indices = None

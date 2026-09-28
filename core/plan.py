@@ -111,9 +111,11 @@ def legacy_to_plan(params):
     sprite_keys = (
         "sprite_cleanup", "sprite_cleanup_agreement", "sprite_outline",
         "sprite_outline_color_mode", "sprite_outline_color", "sprite_outline_darken",
-        "sprite_outline_corners", "sprite_alpha_threshold",
+        "sprite_outline_corners", "sprite_alpha_threshold", "sprite_part_lines",
+        "sprite_part_source",
     )
-    if params.get("sprite_cleanup", False) or params.get("sprite_outline", "NONE") != "NONE":
+    if (params.get("sprite_cleanup", False) or params.get("sprite_part_lines", False)
+            or params.get("sprite_outline", "NONE") != "NONE"):
         stages.append(_stage("sprite", params, sprite_keys))
     finish_keys = (
         "finish_enabled", "finish_brightness", "finish_contrast", "finish_exposure",

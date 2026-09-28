@@ -1,9 +1,11 @@
-"""Sprite stage: stray-pixel cleanup and silhouette outlines on the pixel grid.
+"""Sprite stage: stray-pixel cleanup, part lines, and outlines on the pixel grid.
 
 PixelatorPlus-native stage (no Substance spec counterpart).  The outline idea
 comes from the Pixel Composer research audit (its outline node); this is a
 clean-room NumPy implementation aimed at the Blender workflow of rendering a
-3D model and turning it into a game sprite.
+3D model and turning it into a game sprite.  Part lines go further than a 2D
+tool can: they read an ID map rendered by Blender to find where the model's
+parts meet.
 
 Both operations work on the pixel-cell grid, not on full-resolution pixels:
 each cell is represented by its center sample (the same sampling as
@@ -30,6 +32,8 @@ _LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 _ORTHOGONAL = ((-1, 0), (1, 0), (0, -1), (0, 1))
 _DIAGONAL = ((-1, -1), (-1, 1), (1, -1), (1, 1))
 _COLOR_TOLERANCE = 1e-4
+# ID maps are 8-bit flat renders; different parts differ by whole code values.
+_ID_TOLERANCE = 1.5 / 255.0
 
 
 def _shift(arr, dy, dx, fill):
@@ -134,31 +138,78 @@ def outline_cells(rgb, opaque, mode="OUTSIDE", color_mode="SELECTIVE",
     else:
         # _shift fills with False, so the grid edge never counts as empty.
         target = opaque & _dilate(~opaque, corners)
+    if mode == "OUTSIDE":
+        # A selective outline darkens the sprite color it borders: the mean
+        # of the opaque orthogonal neighbors (diagonals too when a cell only
+        # touches the sprite at a corner).
+        base = _neighbor_mean(rgb, opaque, _ORTHOGONAL)
+        if corners:
+            corner_only = np.isnan(base[..., 0])
+            base = np.where(corner_only[..., None],
+                            _neighbor_mean(rgb, opaque, _DIAGONAL), base)
+        base = base[target]
+    else:
+        base = rgb[target]
+    new_rgb = rgb.copy()
+    new_rgb[target] = _line_ink(color_mode, base, color, darken, palette, apply_space)
+    return new_rgb, opaque | target, target
+
+
+def part_line_cells(rgb, opaque, ids, color_mode="SELECTIVE", color=(0.05, 0.05, 0.08),
+                    darken=0.5, palette=None, apply_space="RGB"):
+    """Draw one-cell lines where two parts of the sprite meet.
+
+    ``ids`` is ``(gh, gw, 3|4)``: each cell's color in an ID map, a flat
+    unantialiased render in which every part (object or material) has its
+    own color; ID alpha below 0.5 means "no part".  An opaque cell becomes a
+    line cell when an orthogonal neighbor belongs to a different part, but
+    only on the darker side of the boundary, so lines are one cell wide and
+    sit in shadow as a pixel artist would place them (ties are broken by ID).
+    Colors follow :func:`outline_cells`; SELECTIVE darkens the cell's own
+    color.  Returns new ``(rgb, opaque, changed)``.
+    """
+    color_mode = str(color_mode or "SELECTIVE").upper()
+    if color_mode not in OUTLINE_COLOR_MODES:
+        raise ValueError(f"unknown line color mode {color_mode!r}")
+    ids = np.asarray(ids, dtype=np.float32)
+    if ids.shape[:2] != opaque.shape:
+        raise ValueError("ID map cells must match the sprite grid")
+    has_part = opaque.copy()
+    if ids.shape[-1] > 3:
+        has_part &= ids[..., 3] >= 0.5
+    key = ids[..., :3]
+    order = np.rint(key * 255.0) @ np.array([65536.0, 256.0, 1.0])
+    luma = rgb @ _LUMA
+    target = np.zeros(opaque.shape, dtype=bool)
+    for dy, dx in _ORTHOGONAL:
+        other_part = _shift(has_part, dy, dx, False)
+        other_key = _shift(key, dy, dx, 0.0)
+        other_luma = _shift(luma, dy, dx, 0.0)
+        other_order = _shift(order, dy, dx, 0.0)
+        boundary = has_part & other_part & np.any(np.abs(key - other_key) > _ID_TOLERANCE, axis=-1)
+        darker = (luma < other_luma) | ((luma == other_luma) & (order < other_order))
+        target |= boundary & darker
+    new_rgb = rgb.copy()
+    new_rgb[target] = _line_ink(color_mode, rgb[target], color, darken, palette, apply_space)
+    return new_rgb, opaque, target
+
+
+def _line_ink(color_mode, base, color, darken, palette, apply_space):
+    """Line colors for ``base`` (the ``(N, 3)`` colors each line cell borders).
+
+    ``SELECTIVE`` darkens ``base``; ``DARKEST`` uses the darkest palette
+    entry; ``CUSTOM`` (or DARKEST without a palette) uses ``color``.  With a
+    finite ``palette`` every result is snapped to it.
+    """
+    count = base.shape[0]
     if palette is not None:
         palette = np.asarray(palette, dtype=np.float32)[:, :3]
-
     if color_mode == "DARKEST" and palette is not None:
-        ink = np.broadcast_to(palette[np.argmin(palette @ _LUMA)], (int(target.sum()), 3))
-    elif color_mode == "SELECTIVE":
-        if mode == "OUTSIDE":
-            # Average the opaque orthogonal neighbors (diagonals too when a
-            # cell only touches the sprite at a corner).
-            base = _neighbor_mean(rgb, opaque, _ORTHOGONAL)
-            corner_only = np.isnan(base[..., 0])
-            if corners:
-                base = np.where(corner_only[..., None],
-                                _neighbor_mean(rgb, opaque, _DIAGONAL), base)
-            base = base[target]
-        else:
-            base = rgb[target]
-        ink = _snap(base * np.float32(1.0 - np.clip(darken, 0.0, 1.0)), palette, apply_space)
-    else:  # CUSTOM, or DARKEST without a palette
-        custom = np.clip(np.asarray(color, dtype=np.float32)[:3], 0.0, 1.0)[None, :]
-        ink = np.broadcast_to(_snap(custom, palette, apply_space), (int(target.sum()), 3))
-
-    new_rgb = rgb.copy()
-    new_rgb[target] = ink
-    return new_rgb, opaque | target, target
+        return np.broadcast_to(palette[np.argmin(palette @ _LUMA)], (count, 3))
+    if color_mode == "SELECTIVE":
+        return _snap(base * np.float32(1.0 - np.clip(darken, 0.0, 1.0)), palette, apply_space)
+    custom = np.clip(np.asarray(color, dtype=np.float32)[:3], 0.0, 1.0)[None, :]
+    return np.broadcast_to(_snap(custom, palette, apply_space), (count, 3))
 
 
 def _neighbor_mean(rgb, opaque, offsets):
@@ -173,10 +224,11 @@ def _neighbor_mean(rgb, opaque, offsets):
         return total / count[..., None]
 
 
-def apply_sprite_stage(rgb, alpha, gw, gh, params, palette=None):
-    """Run cleanup then outline on the cell grid of a full-resolution image.
+def apply_sprite_stage(rgb, alpha, gw, gh, params, palette=None, id_map=None):
+    """Run cleanup, part lines, then outline on the cell grid of an image.
 
-    ``rgb`` is ``(h, w, 3)``, ``alpha`` ``(h, w, 1)``.  Returns updated
+    ``rgb`` is ``(h, w, 3)``, ``alpha`` ``(h, w, 1)``; ``id_map`` is any-size
+    RGBA ID render of the same framing, required by part lines.  Returns updated
     ``(rgb, alpha)``; cells no operation touched keep their full-resolution
     pixels.  Changed cells become uniform, fully opaque or fully transparent.
     """
@@ -193,13 +245,23 @@ def apply_sprite_stage(rgb, alpha, gw, gh, params, palette=None):
             cells_rgb, cells_opaque, params.get("sprite_cleanup_agreement", 3)
         )
         changed |= cleaned
+    line_settings = (
+        params.get("sprite_outline_color_mode", "SELECTIVE"),
+        params.get("sprite_outline_color", (0.05, 0.05, 0.08)),
+        params.get("sprite_outline_darken", 0.5),
+    )
+    if params.get("sprite_part_lines", False):
+        if id_map is None:
+            raise ValueError("Part Lines need an ID map (use Render ID Map)")
+        cells_rgb, cells_opaque, lined = part_line_cells(
+            cells_rgb, cells_opaque, downscale_nearest(np.asarray(id_map, np.float32), gw, gh),
+            *line_settings, palette, params.get("apply_palette_mode", "RGB"),
+        )
+        changed |= lined
     outline_mode = params.get("sprite_outline", "NONE")
     if outline_mode != "NONE":
         cells_rgb, cells_opaque, outlined = outline_cells(
-            cells_rgb, cells_opaque, outline_mode,
-            params.get("sprite_outline_color_mode", "SELECTIVE"),
-            params.get("sprite_outline_color", (0.05, 0.05, 0.08)),
-            params.get("sprite_outline_darken", 0.5),
+            cells_rgb, cells_opaque, outline_mode, *line_settings,
             params.get("sprite_outline_corners", False),
             palette,
             params.get("apply_palette_mode", "RGB"),
