@@ -95,6 +95,36 @@ def _init_centroids(samples, k, mode, rng):
     return samples[rng.choice(n, k, replace=n < k)].copy()
 
 
+def kmeans(points, k, iterations, init_mode, rng, return_labels=False):
+    """Lloyd's k-means on ``(N, 3)`` points; returns ``(k, 3)`` centroids.
+
+    Empty clusters are reseeded with the points farthest from their centroid.
+    With ``return_labels`` also returns each point's final cluster index.
+    """
+    points = np.asarray(points, dtype=np.float32)
+    n = points.shape[0]
+    centroids = _init_centroids(points, k, init_mode, rng)
+    for _ in range(iterations):
+        idx, nearest_d2 = _nearest_indices(points, centroids, return_distances=True)
+        new = centroids.copy()
+        counts = np.bincount(idx, minlength=k)
+        populated = counts > 0
+        for axis in range(3):
+            sums = np.bincount(idx, weights=points[:, axis], minlength=k)
+            new[populated, axis] = sums[populated] / counts[populated]
+        if not np.all(populated):
+            farthest = np.argsort(nearest_d2)[::-1]
+            for offset, ci in enumerate(np.flatnonzero(~populated)):
+                new[ci] = points[farthest[offset % n]]
+        shift = np.abs(new - centroids).max()
+        centroids = new
+        if shift < 1e-4:
+            break
+    if return_labels:
+        return centroids, _nearest_indices(points, centroids)
+    return centroids
+
+
 def kmeans_palette(rgb, k, space="RGB", quality=2, init_mode=1, gamma=1.0,
                    force_colors="NONE", seed=1, chroma_importance=None):
     """Cluster pixel colors into a palette of k colors.
@@ -128,24 +158,7 @@ def kmeans_palette(rgb, k, space="RGB", quality=2, init_mode=1, gamma=1.0,
     if n > max_samples:
         pts = pts[rng.choice(n, max_samples, replace=False)]
     iterations = _ITERATIONS[int(np.clip(quality, 0, 8))]
-
-    centroids = _init_centroids(pts, k, init_mode, rng)
-    for _ in range(iterations):
-        idx, nearest_d2 = _nearest_indices(pts, centroids, return_distances=True)
-        new = centroids.copy()
-        counts = np.bincount(idx, minlength=k)
-        populated = counts > 0
-        for axis in range(3):
-            sums = np.bincount(idx, weights=pts[:, axis], minlength=k)
-            new[populated, axis] = sums[populated] / counts[populated]
-        if not np.all(populated):
-            farthest = np.argsort(nearest_d2)[::-1]
-            for offset, ci in enumerate(np.flatnonzero(~populated)):
-                new[ci] = pts[farthest[offset % n]]
-        shift = np.abs(new - centroids).max()
-        centroids = new
-        if shift < 1e-4:
-            break
+    centroids = kmeans(pts, k, iterations, init_mode, rng)
 
     if chroma_w is not None:
         centroids[:, 1:] /= max(chroma_w, 1e-6)
