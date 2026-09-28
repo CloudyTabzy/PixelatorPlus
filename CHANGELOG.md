@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.4.0] - 2026-09-28
+
+### Added
+
+- **Part Lines** in the Sprite section: one-pixel interior lines where two
+  parts of the model meet, placed on the darker side so they read as shadow
+  line work. They use the shared line color (Selective, Darkest, or Custom)
+  and stay on the palette.
+- **Render ID Map**: a flat, unantialiased Workbench render of the current
+  frame with a distinct color per object or per material, pinned as the ID
+  map that Part Lines read. Render Sprite Sheet renders one per frame
+  automatically.
+
+### Fixed
+
+- With Auto Bake and Auto Connect on, every new render (and animation frame)
+  was composited from the previous bake. The baked node is now detached for
+  the duration of a render and reconnected with the fresh result.
+- Sprite sheets render the 3D scene even when the video sequencer is active.
+
+### Changed
+
+- Plan snapshot keys are derived from the settings; outline color controls are
+  labeled **Line Color** because they also drive Part Lines.
+
 ## [3.3.0] - 2026-09-28
 
 ### Added
