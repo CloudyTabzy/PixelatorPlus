@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.7] - 2026-09-28
+
+### Changed
+
+- Apply, live preview, and sprite-sheet processing now use Blender's GPU
+  compute backend for large RGB finite-palette lookups when available. Blender
+  4.2, unsupported devices, other color spaces, and diffusion modes keep the
+  NumPy CPU path.
+
 ## [3.5.6] - 2026-09-28
 
 ### Fixed

@@ -42,6 +42,9 @@ external app, or internet connection required.
   material.
 - **Fast feedback.** A live preview updates while you tweak, and the
   full-resolution result appears when you Apply.
+- **Uses your hardware automatically.** Large RGB palette lookups use Blender's
+  GPU compute support when available; older Blender versions and unsupported
+  devices fall back to the NumPy CPU path.
 
 ## Features
 

@@ -30,6 +30,7 @@ from .rendering import (
     MAP_KINDS, TemporarySettings, load_pixels, prepare_png_render, render_still,
     scene_has_renderable_content,
 )
+from .gpu_backend import get_palette_accelerator
 
 SHEET_ATLAS_KEY = "pixelatorplus_sheet_atlas"
 
@@ -78,6 +79,14 @@ class SpriteSheetJob:
         }
         self.params = collect_params(self.settings)
         self.images = custom_images(self.settings, self.params)
+        render_scale = scene.render.resolution_percentage / 100.0
+        render_size = (
+            max(1, round(scene.render.resolution_y * render_scale)),
+            max(1, round(scene.render.resolution_x * render_scale)),
+        )
+        self.palette_accelerator = get_palette_accelerator(self.params, render_size)
+        if self.palette_accelerator is not None:
+            self.palette_accelerator.begin_run()
         self.shared = (
             self.settings.sheet_shared_palette
             and self.params.get("quantize_type") == "CUSTOM_PALETTE"
@@ -214,7 +223,13 @@ class SpriteSheetJob:
         if self.palette is not None:
             images["shared_palette"] = self.palette
         images.update(self._frame_maps(index))
-        result = run_pipeline(load_pixels(self.paths[index]), self.params, images=images)
+        result = run_pipeline(
+            load_pixels(self.paths[index]), self.params, images=images,
+            palette_apply=(
+                self.palette_accelerator.apply_palette
+                if self.palette_accelerator is not None else None
+            ),
+        )
         self.grid = result["grid"]
         cells = sheet_mod.native_frame(result["main"], self.grid,
                                        self.sheet_options["pixel_scale"])
@@ -379,7 +394,18 @@ class PIXELATORPLUS_OT_render_sprite_sheet(bpy.types.Operator):
     def _report_done(self, job):
         count = len(json.loads(job.image[SHEET_ATLAS_KEY])["frames"])
         width, height = job.image.size
-        self.report({"INFO"}, f"Sprite sheet '{job.image.name}': {count} frames, {width}x{height}")
+        backend_note = (
+            " (GPU palette mapping)"
+            if job.palette_accelerator is not None and job.palette_accelerator.used else ""
+        )
+        self.report(
+            {"INFO"},
+            f"Sprite sheet '{job.image.name}': {count} frames, {width}x{height}{backend_note}",
+        )
+        accelerator = job.palette_accelerator
+        if accelerator is not None and accelerator.error:
+            detail = " ".join(str(accelerator.error).split())[:120]
+            self.report({"WARNING"}, f"GPU mapping failed; sprite sheet used CPU ({detail})")
 
 
 class PIXELATORPLUS_OT_export_sprite_sheet(bpy.types.Operator):

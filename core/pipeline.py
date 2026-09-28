@@ -293,12 +293,16 @@ def _apply_palette_indices(palette, indices):
     return palette[indices.astype(np.intp, copy=False)].astype(np.float32, copy=False)
 
 
-def _snap_to_palette(image, palette, apply_mode, with_indices):
+def _snap_to_palette(image, palette, apply_mode, with_indices, palette_apply=None):
     """Nearest-palette snap returning ``(image, indices)``.
 
     ``indices`` is ``None`` unless requested, so callers keep one code path
     whether or not a palette-index buffer must be retained.
     """
+    if palette_apply is not None:
+        accelerated = palette_apply(image, palette, apply_mode, with_indices)
+        if accelerated is not None:
+            return accelerated if with_indices else (accelerated, None)
     if with_indices:
         return quantize_mod.apply_palette(image, palette, apply_mode, return_indices=True)
     return quantize_mod.apply_palette(image, palette, apply_mode), None
@@ -321,7 +325,8 @@ def _grid_diffusion(image, gw, gh, snap_fn, params):
     return upscale_nearest(snapped, w, h)
 
 
-def _palette_quantize(image, gw, gh, palette, apply_mode, params, with_indices):
+def _palette_quantize(image, gw, gh, palette, apply_mode, params, with_indices,
+                      palette_apply=None):
     """Quantize to a finite palette, by grid error diffusion when configured.
 
     Returns ``(image, indices)``; diffusion never exposes indices, so they are
@@ -330,7 +335,7 @@ def _palette_quantize(image, gw, gh, palette, apply_mode, params, with_indices):
     if params.get("diffusion", "NONE") != "NONE":
         snap_fn = quantize_mod.palette_snap_fn(palette, apply_mode)
         return _grid_diffusion(image, gw, gh, snap_fn, params), None
-    return _snap_to_palette(image, palette, apply_mode, with_indices)
+    return _snap_to_palette(image, palette, apply_mode, with_indices, palette_apply)
 
 
 def _continuous_lut_fn(lut_name, params, images):
@@ -360,11 +365,12 @@ class _PipelineState:
     index buffer once a stage produces them.
     """
 
-    def __init__(self, img, params, images, plan):
+    def __init__(self, img, params, images, plan, palette_apply=None):
         img = np.asarray(img, dtype=np.float32)
         self.params = params
         self.images = images
         self.plan = plan
+        self.palette_apply = palette_apply
         self.active = set(stage_types(plan))
         self.h, self.w = img.shape[:2]
         self.image = img[..., :3].astype(np.float32)
@@ -557,7 +563,8 @@ def _quantize_stage(state):
                 state.image, state.grid, state.alpha, params, images
             )
         state.image, state.indices = _palette_quantize(
-            state.image, gw, gh, state.palette, state.apply_mode, params, state.retain_indices
+            state.image, gw, gh, state.palette, state.apply_mode, params,
+            state.retain_indices, state.palette_apply,
         )
 
     elif qtype == "PER_CHANNEL":
@@ -604,7 +611,7 @@ def _quantize_stage(state):
                 state.palette = _lut_palette(params, images)
                 state.image, state.indices = _palette_quantize(
                     state.image, gw, gh, state.palette, state.apply_mode, params,
-                    state.retain_indices,
+                    state.retain_indices, state.palette_apply,
                 )
         if params.get("output_default_lut", False):
             state.lut_image = lut_mod.identity_lut()
@@ -698,7 +705,7 @@ def _grid_and_identity(state):
         # Only Output_Palette consumes the indices after this point.
         state.image, state.indices = _snap_to_palette(
             state.image, state.palette, state.apply_mode,
-            bool(params.get("output_palette", False)),
+            bool(params.get("output_palette", False)), state.palette_apply,
         )
 
 
@@ -721,7 +728,8 @@ def _derived_outputs(state, result):
         result["lut"] = lut_mod.encode_lut_from_palette(state.palette)
 
 
-def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=None):
+def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=None,
+                 palette_apply=None):
     """Run PixelatorPlus on an ``(h,w,4)`` float32 image in 0..1.
 
     Stages run in the canonical order (pixelate -> posterize -> tone bands ->
@@ -737,7 +745,9 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
     """
     plan = normalize_plan(params)
     params = plan_to_params(plan)
-    state = _PipelineState(img, params, dict(images or {}), plan)
+    # ``palette_apply`` is an optional edge-provided accelerator callback. It
+    # must return a palette result or ``None`` to request the NumPy fallback.
+    state = _PipelineState(img, params, dict(images or {}), plan, palette_apply)
     active = state.active
     _checkpoint(progress, cancel, 0.0, "prepare")
 

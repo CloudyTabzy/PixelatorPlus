@@ -16,6 +16,7 @@ from .core.lut_cube import file_stamp
 from .core.pipeline import run_pipeline
 from .core.pixelate import downscale_area
 from .operators.apply import PREVIEW_IMAGE_NAME, array_to_image, custom_images, image_to_array
+from .operators.gpu_backend import get_palette_accelerator
 from .properties import collect_params
 
 DEBOUNCE = 0.35
@@ -106,7 +107,20 @@ def _render_preview(s):
     cache_key = preview_key(src, params, images, s.preview_mode, resources)
     result = _preview_cache.get(cache_key) if s.preview_cache_enabled else None
     if result is None:
-        result = run_pipeline(src, params, images=images, preview=True)
+        accelerator = get_palette_accelerator(params, src.shape[:2])
+        if accelerator is not None:
+            accelerator.begin_run()
+        result = run_pipeline(
+            src, params, images=images, preview=True,
+            palette_apply=accelerator.apply_palette if accelerator is not None else None,
+        )
+        if accelerator is not None and accelerator.used:
+            note = (note + " " if note else "") + "GPU palette mapping."
+        elif accelerator is not None and accelerator.error:
+            detail = " ".join(str(accelerator.error).split())[:120]
+            note = (note + " " if note else "") + (
+                f"GPU mapping failed; preview used CPU ({detail})."
+            )
         if s.preview_cache_enabled:
             _preview_cache.put(cache_key, result)
     out = array_to_image(result["main"], PREVIEW_IMAGE_NAME)

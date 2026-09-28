@@ -13,6 +13,7 @@ import bpy
 from ..core.pipeline import PipelineError, run_pipeline
 from ..core.plan import normalize_plan, plan_to_params, stage_types
 from ..properties import collect_params
+from .gpu_backend import get_palette_accelerator
 
 PREVIEW_IMAGE_NAME = "PixelatorPlus Preview"
 
@@ -213,7 +214,17 @@ def apply_settings(scene, source_image=None):
 
     src = image_to_array(source)
     params = collect_params(settings)
-    result = run_pipeline(src, params, images=custom_images(settings, params), preview=False)
+    accelerator = get_palette_accelerator(params, src.shape[:2])
+    if accelerator is not None:
+        accelerator.begin_run()
+    result = run_pipeline(
+        src, params, images=custom_images(settings, params), preview=False,
+        palette_apply=accelerator.apply_palette if accelerator is not None else None,
+    )
+    result["_gpu_palette_mapping"] = bool(accelerator and accelerator.used)
+    result["_gpu_palette_fallback"] = (
+        accelerator.error if accelerator is not None and not accelerator.used else ""
+    )
 
     base = source.name
     out = _write_output(
@@ -268,7 +279,12 @@ class PIXELATORPLUS_OT_apply(bpy.types.Operator):
             space.image = out
 
         gw, gh = result["grid"]
-        self.report({"INFO"}, f"PixelatorPlus: {gw}x{gh} grid -> '{out.name}'")
+        backend_note = " (GPU palette mapping)" if result.get("_gpu_palette_mapping") else ""
+        self.report({"INFO"}, f"PixelatorPlus: {gw}x{gh} grid -> '{out.name}'{backend_note}")
+        fallback = result.get("_gpu_palette_fallback")
+        if fallback:
+            detail = " ".join(str(fallback).split())[:120]
+            self.report({"WARNING"}, f"GPU mapping failed; used CPU instead ({detail})")
         return {"FINISHED"}
 
 
