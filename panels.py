@@ -148,9 +148,10 @@ def _draw_color(layout, s):
             body.prop(s, "palette_ramp_hue_shift")
         else:
             body.prop(s, "k_num_colors", text="Colors")
-        body.prop(s, "color_mode", text="Build Space")
+        if s.palette_extract_method == "KMEANS":
+            body.prop(s, "color_mode", text="Build Space")
+            body.prop(s, "force_colors")
         body.prop(s, "apply_palette_mode", text="Match Space")
-        body.prop(s, "force_colors")
         body.operator("pixelatorplus.freeze_palette", text="Freeze Palette for Animation",
                       icon="FREEZE")
         _draw_palette_tuning(body, s)
@@ -189,16 +190,19 @@ def _draw_palette_tuning(layout, s):
     body = _section(layout, "palette_tuning", "Palette Tuning", "PREFERENCES")
     if body is None:
         return
-    body.prop(s, "initialize_mode", text="Initialize")
-    body.prop(s, "quantize_quality")
-    body.prop(s, "gamma")
+    method = s.palette_extract_method
+    if method == "KMEANS":
+        body.prop(s, "initialize_mode", text="Initialize")
+        body.prop(s, "gamma")
+        body.prop(s, "use_chroma_importance", text="Color Importance")
+        if s.use_chroma_importance:
+            body.prop(s, "chroma_importance", text="Amount", slider=True)
+    if method in ("KMEANS", "RAMPS"):
+        body.prop(s, "quantize_quality")
+        body.prop(s, "use_explicit_quantize_seed", text="Explicit Seed")
+        if s.use_explicit_quantize_seed:
+            body.prop(s, "quantize_seed", text="Seed")
     body.prop(s, "use_pixelated_for_quantize")
-    body.prop(s, "use_explicit_quantize_seed", text="Explicit Seed")
-    if s.use_explicit_quantize_seed:
-        body.prop(s, "quantize_seed", text="Seed")
-    body.prop(s, "use_chroma_importance", text="Color Importance")
-    if s.use_chroma_importance:
-        body.prop(s, "chroma_importance", text="Amount", slider=True)
     body.separator()
     body.prop(s, "palette_sort_mode", text="Sort")
     body.prop(s, "palette_shift", text="Shift")

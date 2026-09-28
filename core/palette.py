@@ -188,15 +188,27 @@ def _rotate_toward(hue, target, amount):
 def extract_ramps(colors, ramps=4, steps=4, hue_shift=20.0, seed=1, quality=2):
     """Build a palette of ``ramps`` hue families with ``steps`` shades each.
 
+    ``colors`` may be flat ``(N, 3)`` RGB samples or an ``(h, w, 3|4)`` RGB(A)
+    image; transparent image pixels are ignored.
     Colors are clustered in Oklab with lightness down-weighted, so families
     form by hue and chroma.  Each family becomes a dark-to-light ramp across
     its own lightness range (widened when the family is nearly flat).  Shades
     rotate their hue by up to ``hue_shift`` degrees toward cool blue in the
     shadows and warm yellow in the highlights, and lose a little chroma at
-    the extremes (15% at most); neutral families stay neutral.  Returns ``(K, 3)`` float32
-    RGB ordered by family, then dark to light (``K <= ramps * steps``).
+    the extremes (15% at most); neutral families stay neutral.  Returns
+    ``(K, 3)`` float32 RGB ordered by family, then dark to light
+    (``K <= ramps * steps``).
     """
-    samples = to_space(np.asarray(colors, dtype=np.float32)[:, :3], "OKLAB").astype(np.float32)
+    colors = np.asarray(colors, dtype=np.float32)
+    if not (
+        (colors.ndim == 2 and colors.shape[-1] == 3)
+        or (colors.ndim == 3 and colors.shape[-1] in (3, 4))
+    ):
+        raise ValueError("color ramps expect (n, 3) samples or an RGB/RGBA image")
+    if not np.isfinite(colors).all():
+        raise ValueError("color ramp samples must be finite")
+    samples_rgb = _flatten_colors(colors)
+    samples = to_space(samples_rgb, "OKLAB").astype(np.float32)
     if samples.shape[0] == 0:
         raise ValueError("cannot build color ramps from an empty image")
     ramps = int(np.clip(ramps, 1, 32))

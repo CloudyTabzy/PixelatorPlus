@@ -102,8 +102,10 @@ APPLY_MODES = [
 
 FORCE_COLORS = [
     ("NONE", "None", "No forced colors"),
-    ("DARKEST_BRIGHTEST", "Darkest Brightest", "Force the darkest and brightest image colors into the palette"),
-    ("BLACK_WHITE", "Black White", "Force pure black and pure white into the palette"),
+    ("DARKEST_BRIGHTEST", "Darkest Brightest",
+     "Replace two least-used K-means colors with the image's darkest and brightest colors"),
+    ("BLACK_WHITE", "Black White",
+     "Replace two least-used K-means colors with pure black and pure white"),
 ]
 
 

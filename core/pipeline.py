@@ -181,7 +181,11 @@ def build_shared_palette(frames, params, images=None, samples_per_frame=65536):
     for frame in frames:
         frame_images = images
         if isinstance(frame, tuple):
+            if len(frame) != 2 or not isinstance(frame[1], dict):
+                raise ValueError("per-frame inputs must be (image, image_dict) pairs")
             frame, extra = frame
+            if any(not isinstance(key, str) for key in extra):
+                raise ValueError("per-frame image keys must be strings")
             frame_images = dict(images, **extra)
         result = run_pipeline(frame, prep, frame_images)
         main = result["main"]
@@ -743,7 +747,8 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
         _posterize_stage(state)
     if "shading" in active:
         _shading_stage(state)
-    _checkpoint(progress, cancel, 0.35, "posterize")
+    post_adjust = "tone_bands" if "shading" in active else "posterize"
+    _checkpoint(progress, cancel, 0.35, post_adjust)
     if "dither" in active and params.get("dither_type", "NONE") != "NONE":
         mask_preview = _dither_stage(state)
         if mask_preview is not None:

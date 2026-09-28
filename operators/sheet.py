@@ -21,7 +21,7 @@ import bpy
 import numpy as np
 
 from ..core import sheet as sheet_mod
-from ..core.pipeline import PipelineError, build_shared_palette, run_pipeline
+from ..core.pipeline import build_shared_palette, run_pipeline
 from ..properties import collect_params
 from .apply import array_to_image, custom_images, required_custom_image_keys
 from .export import save_image_copy
@@ -54,6 +54,20 @@ class SpriteSheetJob:
         self.scene = scene
         self.settings = scene.pixelatorplus
         self.frame_numbers = sheet_frame_numbers(scene)
+        self.scene_name = str(scene.name)
+        self.sheet_options = {
+            "transparent": bool(self.settings.sheet_transparent),
+            "pixel_scale": int(self.settings.sheet_pixel_scale),
+            "layout": self.settings.sheet_layout,
+            "columns": int(self.settings.sheet_columns),
+            "spacing": int(self.settings.sheet_spacing),
+            "padding": int(self.settings.sheet_padding),
+            "trim": bool(self.settings.sheet_trim),
+            "skip_empty": bool(self.settings.sheet_skip_empty),
+            "frame_step": max(1, int(self.settings.sheet_frame_step)),
+            "fps": int(scene.render.fps),
+            "fps_base": float(scene.render.fps_base or 1.0),
+        }
         self.params = collect_params(self.settings)
         self.images = custom_images(self.settings, self.params)
         self.shared = (
@@ -75,11 +89,20 @@ class SpriteSheetJob:
         self._frame = scene.frame_current
         self._tmp = tempfile.mkdtemp(prefix="pixelatorplus_sheet_")
         self._temp = TemporarySettings()
-        self._override_scene()
+        try:
+            self._override_scene()
+        except Exception as exc:
+            try:
+                self.close()
+            except Exception as cleanup_error:
+                raise RuntimeError(
+                    f"sprite-sheet setup failed ({exc}); scene cleanup also failed ({cleanup_error})"
+                ) from exc
+            raise
 
     # -- scene settings --------------------------------------------------------
     def _override_scene(self):
-        prepare_png_render(self._temp, self.scene, self.settings.sheet_transparent)
+        prepare_png_render(self._temp, self.scene, self.sheet_options["transparent"])
         if baked_output_drives_compositor(self.scene):
             # A connected baked Image node would make every frame that one
             # static image; frames need the raw render.
@@ -89,11 +112,31 @@ class SpriteSheetJob:
 
     def close(self):
         """Restore the scene and remove temporary frames (safe to call twice)."""
-        if self._temp is not None:
-            self._temp.restore()
-            self._temp = None
+        temp, self._temp = self._temp, None
+        tmp, self._tmp = self._tmp, None
+        if temp is None and tmp is None:
+            return
+        first_error = None
+        if temp is not None:
+            try:
+                temp.restore()
+            except Exception as restore_error:
+                try:
+                    temp.restore()
+                except Exception as retry_error:
+                    self._temp = temp
+                    first_error = RuntimeError(
+                        f"scene restore failed ({restore_error}); retry failed ({retry_error})"
+                    )
+        try:
             self.scene.frame_set(self._frame)
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        except Exception as exc:
+            if first_error is None:
+                first_error = exc
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
+        if first_error is not None:
+            raise first_error
 
     # -- progress --------------------------------------------------------------
     @property
@@ -165,29 +208,29 @@ class SpriteSheetJob:
         images.update(self._frame_maps(index))
         result = run_pipeline(load_pixels(self.paths[index]), self.params, images=images)
         self.grid = result["grid"]
-        cells = sheet_mod.native_frame(result["main"], self.grid, self.settings.sheet_pixel_scale)
+        cells = sheet_mod.native_frame(result["main"], self.grid,
+                                       self.sheet_options["pixel_scale"])
         # Blender buffers are bottom-up; sheets and atlases are top-down.
         self.cells.append(np.flipud(cells))
 
     def _pack(self):
-        s = self.settings
+        options = self.sheet_options
         sheet, rects, numbers, trim = sheet_mod.build_sheet(
-            self.cells, self.frame_numbers, s.sheet_layout, s.sheet_columns,
-            s.sheet_spacing, s.sheet_padding, s.sheet_trim, s.sheet_skip_empty,
+            self.cells, self.frame_numbers, options["layout"], options["columns"],
+            options["spacing"], options["padding"], options["trim"], options["skip_empty"],
         )
-        name = bpy.path.clean_name(self.scene.name) or "sprite"
-        render = self.scene.render
-        fps = render.fps / (render.fps_base or 1.0)
+        name = bpy.path.clean_name(self.scene_name) or "sprite"
+        fps = options["fps"] / options["fps_base"]
         frame_h, frame_w = self.cells[0].shape[:2]
         atlas = sheet_mod.atlas_json(
             rects, numbers, (sheet.shape[1], sheet.shape[0]), (frame_w, frame_h),
-            f"{name}.png", 1000.0 * max(1, s.sheet_frame_step) / fps, trim, name,
+            f"{name}.png", 1000.0 * options["frame_step"] / fps, trim, name,
             self.palette if self.shared else None,
         )
         image = array_to_image(np.ascontiguousarray(np.flipud(sheet)),
-                               f"{self.scene.name} [PixelatorPlus Sheet]")
+                               f"{self.scene_name} [PixelatorPlus Sheet]")
         image[SHEET_ATLAS_KEY] = json.dumps(atlas)
-        s.last_sheet_name = image.name
+        self.settings.last_sheet_name = image.name
         self.image = image
 
 
@@ -206,6 +249,7 @@ class PIXELATORPLUS_OT_render_sprite_sheet(bpy.types.Operator):
 
     _job = None
     _timer = None
+    _progress_active = False
 
     @classmethod
     def poll(cls, context):
@@ -214,31 +258,46 @@ class PIXELATORPLUS_OT_render_sprite_sheet(bpy.types.Operator):
     def execute(self, context):
         try:
             job = SpriteSheetJob(context.scene)
-        except ValueError as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
+        failure = None
         try:
             while not job.step():
                 pass
-        except (PipelineError, ValueError, RuntimeError) as exc:
-            self.report({"ERROR"}, f"Sprite sheet failed: {exc}")
-            return {"CANCELLED"}
-        finally:
+        except Exception as exc:
+            failure = exc
+        try:
             job.close()
+        except Exception as exc:
+            if failure is None:
+                failure = exc
+        if failure is not None:
+            self.report({"ERROR"}, f"Sprite sheet failed: {failure}")
+            return {"CANCELLED"}
         _show_in_image_editor(context, job.image)
         self._report_done(job)
         return {"FINISHED"}
 
     def invoke(self, context, event):
+        self._job = None
+        self._timer = None
+        self._progress_active = False
         try:
             self._job = SpriteSheetJob(context.scene)
-        except ValueError as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         wm = context.window_manager
-        self._timer = wm.event_timer_add(0.01, window=context.window)
-        wm.modal_handler_add(self)
-        wm.progress_begin(0, self._job.total_steps)
+        try:
+            self._timer = wm.event_timer_add(0.01, window=context.window)
+            wm.progress_begin(0, self._job.total_steps)
+            self._progress_active = True
+            wm.modal_handler_add(self)
+        except Exception as exc:
+            self._stop(context)
+            self.report({"ERROR"}, f"Could not start the sprite-sheet job: {exc}")
+            return {"CANCELLED"}
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
@@ -250,13 +309,18 @@ class PIXELATORPLUS_OT_render_sprite_sheet(bpy.types.Operator):
             return {"PASS_THROUGH"}
         try:
             done = self._job.step()
-        except (PipelineError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             self._stop(context)
             self.report({"ERROR"}, f"Sprite sheet failed: {exc}")
             return {"CANCELLED"}
-        context.window_manager.progress_update(self._job.completed)
-        if context.workspace is not None:
-            context.workspace.status_text_set(f"{self._job.status}  (Esc to cancel)")
+        try:
+            context.window_manager.progress_update(self._job.completed)
+            if context.workspace is not None:
+                context.workspace.status_text_set(f"{self._job.status}  (Esc to cancel)")
+        except Exception as exc:
+            self._stop(context)
+            self.report({"ERROR"}, f"Sprite sheet UI update failed: {exc}")
+            return {"CANCELLED"}
         if not done:
             return {"RUNNING_MODAL"}
         job = self._job
@@ -267,14 +331,35 @@ class PIXELATORPLUS_OT_render_sprite_sheet(bpy.types.Operator):
 
     def _stop(self, context):
         wm = context.window_manager
-        if self._timer is not None:
-            wm.event_timer_remove(self._timer)
-            self._timer = None
-        wm.progress_end()
+        job, self._job = self._job, None
+        timer, self._timer = self._timer, None
+        first_error = None
+        if timer is not None:
+            try:
+                wm.event_timer_remove(timer)
+            except Exception as exc:
+                first_error = exc
+        if self._progress_active:
+            self._progress_active = False
+            try:
+                wm.progress_end()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
         if context.workspace is not None:
-            context.workspace.status_text_set(None)
-        if self._job is not None:
-            self._job.close()
+            try:
+                context.workspace.status_text_set(None)
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if job is not None:
+            try:
+                job.close()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            self.report({"WARNING"}, f"Sprite-sheet cleanup issue: {first_error}")
 
     def _report_done(self, job):
         count = len(json.loads(job.image[SHEET_ATLAS_KEY])["frames"])

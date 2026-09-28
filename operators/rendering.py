@@ -21,7 +21,10 @@ import tempfile
 
 import bpy
 
-from .apply import array_to_image, image_to_array
+from .apply import array_to_image, image_to_array, _scene_owner_token
+
+_MAP_KIND_KEY = "pixelatorplus_map_kind"
+_MAP_OWNER_KEY = "pixelatorplus_map_owner"
 
 
 class TemporarySettings:
@@ -42,19 +45,29 @@ class TemporarySettings:
 
     def try_set(self, owner, name, value):
         """Like :meth:`set`, but skip missing properties and rejected values."""
-        if not hasattr(owner, name):
-            return False
         try:
+            if not hasattr(owner, name):
+                return False
             self.set(owner, name, value)
-        except (TypeError, ValueError):
+        except (ReferenceError, RuntimeError, TypeError, ValueError):
             return False
         return True
 
     def restore(self):
         """Restore every changed property, in first-change order (safe to repeat)."""
         saved, self._saved = self._saved, {}
-        for owner, name, value in saved.values():
-            setattr(owner, name, value)
+        failed = {}
+        first_error = None
+        for key, (owner, name, value) in saved.items():
+            try:
+                setattr(owner, name, value)
+            except Exception as exc:
+                failed[key] = (owner, name, value)
+                if first_error is None:
+                    first_error = exc
+        self._saved = failed
+        if first_error is not None:
+            raise first_error
 
 
 def prepare_png_render(temp, scene, transparent=True):
@@ -171,8 +184,28 @@ def render_map(scene, key):
         render_still(temp, scene, path)
         return load_pixels(path)
     finally:
-        temp.restore()
-        shutil.rmtree(folder, ignore_errors=True)
+        try:
+            temp.restore()
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+def _write_map_image(scene, key, pixels):
+    """Update this scene's generated map without reusing an unrelated image."""
+    label = MAP_KINDS[key][0]
+    settings = scene.pixelatorplus
+    owner = _scene_owner_token(scene)
+    current = getattr(settings, f"{key}_image", None)
+    if (current is not None and current.get(_MAP_KIND_KEY) == key
+            and current.get(_MAP_OWNER_KEY) == owner):
+        image = array_to_image(pixels, current.name, image=current)
+    else:
+        name = f"{scene.name} [PixelatorPlus {label}]"
+        image = array_to_image(pixels, name, reuse=False)
+        image[_MAP_KIND_KEY] = key
+        image[_MAP_OWNER_KEY] = owner
+    setattr(settings, f"{key}_image", image)
+    return image
 
 
 class _RenderMapOperator:
@@ -190,11 +223,10 @@ class _RenderMapOperator:
         label = MAP_KINDS[self.map_key][0]
         try:
             pixels = render_map(scene, self.map_key)
-        except RuntimeError as exc:
-            self.report({"ERROR"}, f"Could not render the {label}: {exc}")
+            image = _write_map_image(scene, self.map_key, pixels)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not create the {label}: {exc}")
             return {"CANCELLED"}
-        image = array_to_image(pixels, f"{scene.name} [PixelatorPlus {label}]")
-        setattr(scene.pixelatorplus, f"{self.map_key}_image", image)
         self.report({"INFO"}, f"{label} '{image.name}' rendered and pinned")
         return {"FINISHED"}
 

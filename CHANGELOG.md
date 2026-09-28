@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.1] - 2026-09-28
+
+### Fixed
+
+- Tone Bands now rejects malformed or non-finite inputs clearly, falls back
+  to image lightness where a Light Map is transparent, and handles many ID-map
+  regions without repeatedly scanning the whole image for every part.
+- Render ID Map and Render Light Map no longer overwrite unrelated images
+  that happen to use the add-on's preferred output name; generated maps are
+  safely refreshed for the scene that owns them.
+- Sprite-sheet jobs use the layout and scale settings captured at startup,
+  and cleanup restores scene settings and removes temporary frames after
+  setup or render failures.
+- Palette extraction controls now hide options that do not affect the selected
+  method.
+- Color Ramps accepts flat RGB samples and RGB/RGBA images, ignores
+  transparent pixels, and rejects non-finite colors.
+- The palette panel hides extraction controls that do not affect the selected
+  method.
+
 ## [3.5.0] - 2026-09-28
 
 ### Added
