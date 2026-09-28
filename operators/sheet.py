@@ -31,6 +31,30 @@ from .rendering import (
 )
 
 SHEET_ATLAS_KEY = "pixelatorplus_sheet_atlas"
+_RENDERABLE_OBJECT_TYPES = frozenset({
+    "MESH", "CURVE", "SURFACE", "META", "FONT", "VOLUME", "POINTCLOUD",
+    "CURVES", "GPENCIL", "GREASEPENCIL",
+})
+
+
+def scene_has_renderable_content(scene):
+    """Return whether a render-enabled scene collection can draw geometry."""
+    pending = [(scene.collection, frozenset())]
+    while pending:
+        collection, ancestors = pending.pop()
+        pointer = collection.as_pointer()
+        if collection.hide_render or pointer in ancestors:
+            continue
+        path = ancestors | {pointer}
+        for obj in collection.objects:
+            if obj.hide_render:
+                continue
+            if obj.type in _RENDERABLE_OBJECT_TYPES:
+                return True
+            if obj.type == "EMPTY" and obj.instance_collection is not None:
+                pending.append((obj.instance_collection, path))
+        pending.extend((child, path) for child in collection.children)
+    return False
 
 
 def sheet_frame_numbers(scene):
@@ -51,6 +75,11 @@ class SpriteSheetJob:
     def __init__(self, scene):
         if scene.camera is None:
             raise ValueError("the scene needs an active camera to render a sprite sheet")
+        if not scene_has_renderable_content(scene):
+            raise ValueError(
+                "the scene has no renderable objects; add a visible mesh, curve, "
+                "or other renderable object before rendering a sprite sheet"
+            )
         self.scene = scene
         self.settings = scene.pixelatorplus
         self.frame_numbers = sheet_frame_numbers(scene)

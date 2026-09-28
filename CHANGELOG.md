@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.2] - 2026-09-28
+
+### Fixed
+
+- Render Sprite Sheet now stops immediately with a clear error when the scene
+  has no render-enabled geometry, instead of rendering every frame in the
+  scene range to blank images.
+
 ## [3.5.1] - 2026-09-28
 
 ### Fixed
