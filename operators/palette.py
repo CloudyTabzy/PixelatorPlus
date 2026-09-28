@@ -22,6 +22,13 @@ def freeze_palette(scene):
     no palette (for example, the Quantize stage is disabled in the stack).
     """
     settings = scene.pixelatorplus
+    if any(
+        stage.stage_id == "quantize" and not stage.enabled
+        for stage in settings.v3.stage_stack
+    ):
+        raise ValueError(
+            "The Quantize stage is disabled; enable it before freezing a palette"
+        )
     _output, result = apply_settings(scene)
     # The palette before Palette Tint: tinting is re-applied on every run,
     # so freezing the tinted colors would tint twice.
@@ -57,6 +64,10 @@ class PIXELATORPLUS_OT_freeze_palette(bpy.types.Operator):
             settings and settings.input_image
             # Only generated palettes vary between frames.
             and settings.quantize_type == "CUSTOM_PALETTE"
+            and not any(
+                stage.stage_id == "quantize" and not stage.enabled
+                for stage in settings.v3.stage_stack
+            )
         )
 
     def execute(self, context):

@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.3] - 2026-09-28
+
+### Fixed
+
+- Render ID Map and Render Light Map now stop before rendering when the scene
+  has no render-enabled geometry, instead of creating blank maps.
+- Freeze Palette checks that Quantize is enabled before running the full image
+  pipeline, avoiding a long run that could only end in a no-palette error.
+
 ## [3.5.2] - 2026-09-28
 
 ### Fixed

@@ -25,6 +25,31 @@ from .apply import array_to_image, image_to_array, _scene_owner_token
 
 _MAP_KIND_KEY = "pixelatorplus_map_kind"
 _MAP_OWNER_KEY = "pixelatorplus_map_owner"
+_RENDERABLE_OBJECT_TYPES = frozenset({
+    "MESH", "CURVE", "SURFACE", "META", "FONT", "VOLUME", "POINTCLOUD",
+    "CURVES", "GPENCIL", "GREASEPENCIL",
+})
+
+
+def scene_has_renderable_content(scene):
+    """Return whether a render-enabled scene collection can draw geometry."""
+    pending = [(scene.collection, frozenset())]
+    while pending:
+        collection, ancestors = pending.pop()
+        pointer = collection.as_pointer()
+        if collection.hide_render or pointer in ancestors:
+            continue
+        path = ancestors | {pointer}
+        for obj in collection.objects:
+            if obj.hide_render:
+                continue
+            if obj.type in _RENDERABLE_OBJECT_TYPES:
+                return True
+            if (obj.type == "EMPTY" and obj.instance_type == "COLLECTION"
+                    and obj.instance_collection is not None):
+                pending.append((obj.instance_collection, path))
+        pending.extend((child, path) for child in collection.children)
+    return False
 
 
 class TemporarySettings:
@@ -216,11 +241,17 @@ class _RenderMapOperator:
 
     @classmethod
     def poll(cls, context):
-        return bool(context.scene and context.scene.camera)
+        scene = context.scene
+        return bool(
+            scene and scene.camera and scene_has_renderable_content(scene)
+        )
 
     def execute(self, context):
         scene = context.scene
         label = MAP_KINDS[self.map_key][0]
+        if not scene_has_renderable_content(scene):
+            self.report({"ERROR"}, "The scene has no renderable objects for a map render")
+            return {"CANCELLED"}
         try:
             pixels = render_map(scene, self.map_key)
             image = _write_map_image(scene, self.map_key, pixels)

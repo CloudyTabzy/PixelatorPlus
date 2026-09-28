@@ -14,6 +14,7 @@ import bpy
 
 from .core.pixelate import compute_grid
 from .operators import assets
+from .operators.rendering import scene_has_renderable_content
 from .properties import V3_STAGE_ITEMS
 
 
@@ -69,6 +70,14 @@ def _grid_summary(s):
         s.use_separate_pixel_count, s.pixel_count_x, s.pixel_count_y,
     )
     return f"{gw} × {gh} cells"
+
+
+def _render_map_warning(layout, scene):
+    """Explain why the scene-map render buttons are unavailable."""
+    if scene.camera is None:
+        layout.label(text="Map renders need an active scene camera.", icon="ERROR")
+    elif not scene_has_renderable_content(scene):
+        layout.label(text="Map renders need render-enabled scene geometry.", icon="ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +163,10 @@ def _draw_color(layout, s):
         body.prop(s, "apply_palette_mode", text="Match Space")
         body.operator("pixelatorplus.freeze_palette", text="Freeze Palette for Animation",
                       icon="FREEZE")
+        if any(stage.stage_id == "quantize" and not stage.enabled
+               for stage in s.v3.stage_stack):
+            body.label(text="Enable Quantize in the Stage Stack to freeze a palette.",
+                       icon="INFO")
         _draw_palette_tuning(body, s)
     elif qt == "PER_CHANNEL":
         body.prop(s, "quantize_colors_or_bits", text="Levels By")
@@ -235,7 +248,7 @@ def _draw_posterize(layout, s):
     body.prop(s, "range_map_image", text="Range Map")
 
 
-def _draw_tone_bands(layout, s):
+def _draw_tone_bands(layout, s, scene):
     body = _section(layout, "tone_bands", "Tone Bands", "LIGHT_SUN",
                     f"{s.shade_band_count} bands" if s.shade_bands else "",
                     toggle=(s, "shade_bands"))
@@ -256,6 +269,7 @@ def _draw_tone_bands(layout, s):
         row.operator("pixelatorplus.render_id_map", text="", icon="RENDER_STILL")
     if s.shade_band_source == "LIGHT_MAP" or s.shade_band_per_part:
         body.label(text="Sprite sheets render these maps automatically.", icon="INFO")
+        _render_map_warning(body, scene)
 
 
 def _draw_dither(layout, s):
@@ -320,7 +334,7 @@ def _draw_dither_mask(layout, s):
     body.prop(s, "preview_dither_mask", text="Show Mask Instead")
 
 
-def _draw_sprite(layout, s):
+def _draw_sprite(layout, s, scene):
     parts = []
     if s.sprite_outline != "NONE":
         parts.append("Outline")
@@ -342,6 +356,7 @@ def _draw_sprite(layout, s):
         row.prop(s, "id_map_image", text="ID Map")
         row.operator("pixelatorplus.render_id_map", text="", icon="RENDER_STILL")
         body.label(text="Sprite sheets render ID maps automatically.", icon="INFO")
+        _render_map_warning(body, scene)
     body.prop(s, "sprite_outline")
     if s.sprite_outline != "NONE":
         body.prop(s, "sprite_outline_corners", text="Corners")
@@ -424,6 +439,8 @@ def _draw_sprite_sheet(layout, scene):
     row.operator("pixelatorplus.render_sprite_sheet", icon="RENDER_ANIMATION")
     if scene.camera is None:
         body.label(text="Needs an active scene camera.", icon="ERROR")
+    elif not scene_has_renderable_content(scene):
+        body.label(text="Needs render-enabled scene geometry.", icon="ERROR")
     body.prop(s, "sheet_use_scene_range", text="Scene Range")
     if not s.sheet_use_scene_range:
         col = body.column(align=True)
@@ -533,9 +550,9 @@ def _draw(layout, context, compositor=False):
     _draw_workflow(layout, s)
     _draw_pixels(layout, s)
     _draw_color(layout, s)
-    _draw_tone_bands(layout, s)
+    _draw_tone_bands(layout, s, context.scene)
     _draw_dither(layout, s)
-    _draw_sprite(layout, s)
+    _draw_sprite(layout, s, context.scene)
     _draw_finish(layout, s)
     _draw_output(layout, s)
     _draw_sprite_sheet(layout, context.scene)

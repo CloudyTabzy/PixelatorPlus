@@ -28,33 +28,10 @@ from .export import save_image_copy
 from .hybrid import baked_output_drives_compositor
 from .rendering import (
     MAP_KINDS, TemporarySettings, load_pixels, prepare_png_render, render_still,
+    scene_has_renderable_content,
 )
 
 SHEET_ATLAS_KEY = "pixelatorplus_sheet_atlas"
-_RENDERABLE_OBJECT_TYPES = frozenset({
-    "MESH", "CURVE", "SURFACE", "META", "FONT", "VOLUME", "POINTCLOUD",
-    "CURVES", "GPENCIL", "GREASEPENCIL",
-})
-
-
-def scene_has_renderable_content(scene):
-    """Return whether a render-enabled scene collection can draw geometry."""
-    pending = [(scene.collection, frozenset())]
-    while pending:
-        collection, ancestors = pending.pop()
-        pointer = collection.as_pointer()
-        if collection.hide_render or pointer in ancestors:
-            continue
-        path = ancestors | {pointer}
-        for obj in collection.objects:
-            if obj.hide_render:
-                continue
-            if obj.type in _RENDERABLE_OBJECT_TYPES:
-                return True
-            if obj.type == "EMPTY" and obj.instance_collection is not None:
-                pending.append((obj.instance_collection, path))
-        pending.extend((child, path) for child in collection.children)
-    return False
 
 
 def sheet_frame_numbers(scene):
@@ -282,7 +259,10 @@ class PIXELATORPLUS_OT_render_sprite_sheet(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return bool(context.scene and context.scene.camera)
+        scene = context.scene
+        return bool(
+            scene and scene.camera and scene_has_renderable_content(scene)
+        )
 
     def execute(self, context):
         try:
