@@ -22,13 +22,12 @@ import numpy as np
 
 from ..core import sheet as sheet_mod
 from ..core.pipeline import PipelineError, build_shared_palette, run_pipeline
-from ..core.plan import normalize_plan, stage_types
 from ..properties import collect_params
-from .apply import array_to_image, custom_images
+from .apply import array_to_image, custom_images, required_custom_image_keys
 from .export import save_image_copy
 from .hybrid import baked_output_drives_compositor
 from .rendering import (
-    TemporarySettings, load_pixels, prepare_id_render, prepare_png_render, render_still,
+    MAP_KINDS, TemporarySettings, load_pixels, prepare_png_render, render_still,
 )
 
 SHEET_ATLAS_KEY = "pixelatorplus_sheet_atlas"
@@ -69,12 +68,10 @@ class SpriteSheetJob:
         self.index = 0
         self.completed = 0
         self.image = None
-        # Part Lines need an ID map rendered with every frame.
-        self.part_lines = (
-            self.params.get("sprite_part_lines", False)
-            and "sprite" in stage_types(normalize_plan(self.params))
-        )
-        self.id_paths = []
+        # Scene maps (ID, light) the active stages read, rendered per frame.
+        self.map_keys = [key for key in MAP_KINDS
+                         if key in required_custom_image_keys(self.params)]
+        self.map_paths = {key: [] for key in self.map_keys}
         self._frame = scene.frame_current
         self._tmp = tempfile.mkdtemp(prefix="pixelatorplus_sheet_")
         self._temp = TemporarySettings()
@@ -107,7 +104,7 @@ class SpriteSheetJob:
     def status(self):
         count = len(self.frame_numbers)
         if self.phase == "render":
-            extra = " and its ID map" if self.part_lines else ""
+            extra = "".join(f" + {MAP_KINDS[key][0]}" for key in self.map_keys)
             return f"Rendering frame {self.index + 1}/{count}{extra}"
         if self.phase == "palette":
             return "Building the shared palette"
@@ -125,7 +122,9 @@ class SpriteSheetJob:
                 self.phase, self.index = ("palette" if self.shared else "process"), 0
         elif self.phase == "palette":
             self.palette = build_shared_palette(
-                (load_pixels(path) for path in self.paths), self.params, self.images
+                ((load_pixels(path), self._frame_maps(index))
+                 for index, path in enumerate(self.paths)),
+                self.params, self.images,
             )
             self.phase = "process"
         elif self.phase == "process":
@@ -145,25 +144,28 @@ class SpriteSheetJob:
         path = os.path.join(self._tmp, f"frame_{frame:06d}.png")
         render_still(self._temp, self.scene, path)
         self.paths.append(path)
-        if self.part_lines:
-            id_path = os.path.join(self._tmp, f"id_{frame:06d}.png")
-            id_temp = TemporarySettings()
+        for key in self.map_keys:
+            map_path = os.path.join(self._tmp, f"{key}_{frame:06d}.png")
+            map_temp = TemporarySettings()
             try:
-                prepare_id_render(id_temp, self.scene, self.settings.sprite_part_source)
-                render_still(id_temp, self.scene, id_path)
+                MAP_KINDS[key][1](map_temp, self.scene)
+                render_still(map_temp, self.scene, map_path)
             finally:
-                id_temp.restore()
-            self.id_paths.append(id_path)
+                map_temp.restore()
+            self.map_paths[key].append(map_path)
+
+    def _frame_maps(self, index):
+        """The scene maps (ID, light) rendered with frame ``index``."""
+        return {key: load_pixels(self.map_paths[key][index]) for key in self.map_keys}
 
     def _process(self, index):
         images = dict(self.images)
         if self.palette is not None:
             images["shared_palette"] = self.palette
-        if self.part_lines:
-            images["id_map"] = load_pixels(self.id_paths[index])
+        images.update(self._frame_maps(index))
         result = run_pipeline(load_pixels(self.paths[index]), self.params, images=images)
         self.grid = result["grid"]
-        cells =sheet_mod.native_frame(result["main"], self.grid, self.settings.sheet_pixel_scale)
+        cells = sheet_mod.native_frame(result["main"], self.grid, self.settings.sheet_pixel_scale)
         # Blender buffers are bottom-up; sheets and atlases are top-down.
         self.cells.append(np.flipud(cells))
 

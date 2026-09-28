@@ -15,9 +15,9 @@ external app, or internet connection required.
 
 ## Why PixelatorPlus?
 
-- **Instant retro looks.** Sixteen one-click **Style Recipes**, from *1-Bit
+- **Instant retro looks.** Seventeen one-click **Style Recipes**, from *1-Bit
   Ink* and *Handheld 4-Tone* to *Demoscene 32*, *Newsprint Halftone*, and
-  *Game Sprite*. Every recipe stays fully editable.
+  *Game Sprite*, plus the cel-shaded *Cel Sprite*. Every recipe stays editable.
 - **Feeling stuck? Press Surprise Me.** It picks a recipe and tastefully
   varies the resolution, dither, palette, and seed. It's a quick way to find a
   look you wouldn't have dialed in yourself.
@@ -73,6 +73,9 @@ external app, or internet connection required.
 - **Generate Custom Palette** extracts 2–256 colors with k-means (in RGB,
   CIELAB, or Oklab), frequency, or exact-color extraction. Palettes can be
   sorted, shifted, trimmed, or swapped against another palette.
+- **Color Ramps** builds hue-family palettes from shadow to highlight, with
+  pixel-art hue shifting. **Oklab (Hue First)** helps lit pixels stay with the
+  right color family when matching those ramps.
 - **Freeze Palette for Animation** saves the generated palette as an image
   and switches to it, so later frames and renders never drift.
 - **Built-in palettes and reducers** cover dozens of classic machines and
@@ -84,6 +87,13 @@ external app, or internet connection required.
   gamma, and per-channel control.
 - **LUTs everywhere**: use standard `.cube` 3D LUTs or 4K image LUTs, and
   export your palette as a `.cube` or 4K LUT for use in other apps.
+
+### Tone Bands
+
+- **Tone Bands** turns smooth shading into a few cel-style tones. Band by the
+  image's lightness or use **Render Light Map** for texture-free scene
+  lighting; **Per Part** gives each object or material its own tone range.
+  Sprite sheets render the required light and ID maps for every frame.
 
 ### Sprite
 
@@ -174,10 +184,10 @@ animated model, and press **Render Sprite Sheet**. The background is rendered
 transparent automatically, so outlines follow the silhouette.
 
 The sidebar keeps the essentials (input, recipe, Apply, live preview) at
-the top. Below them, foldable **Pixels**, **Color**, **Dither**, **Sprite**,
-**Finish**, and **Output** sections show a one-line summary while folded, so
-you can see the whole setup at a glance. **Advanced** holds Palette Lock,
-Grid Coherence, the stage stack, and restorable plan snapshots.
+the top. Below them, foldable **Pixels**, **Color**, **Tone Bands**, **Dither**,
+**Sprite**, **Finish**, and **Output** sections show a one-line summary while
+folded, so you can see the whole setup at a glance. **Advanced** holds Palette
+Lock, Grid Coherence, the stage stack, and restorable plan snapshots.
 
 ## Credits and License
 

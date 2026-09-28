@@ -126,6 +126,14 @@ EFFECT_BASELINE = {
     "sprite_alpha_threshold": 0.5,
     "sprite_part_lines": False,
     "sprite_part_source": "OBJECT",
+    "palette_ramp_count": 4,
+    "palette_ramp_steps": 4,
+    "palette_ramp_hue_shift": 20.0,
+    "shade_bands": False,
+    "shade_band_count": 3,
+    "shade_band_source": "LIGHTNESS",
+    "shade_band_per_part": False,
+    "shade_flatten": True,
 }
 
 
@@ -412,6 +420,28 @@ PRESETS = (
             "sprite_outline": "OUTSIDE",
             "sprite_outline_color_mode": "SELECTIVE",
             "sprite_outline_darken": 0.55,
+        },
+    },
+    {
+        "id": "CEL_SPRITE",
+        "name": "Cel Sprite",
+        "description": "Flat cel-shaded tones on hand-built, hue-shifted color ramps",
+        "values": {
+            "square_pixel_count": 64,
+            "downscale_mode": "NEAREST_SOFTER",
+            "shade_bands": True,
+            "shade_band_count": 3,
+            "quantize_type": "CUSTOM_PALETTE",
+            "palette_extract_method": "RAMPS",
+            "palette_ramp_count": 4,
+            "palette_ramp_steps": 3,
+            "palette_ramp_hue_shift": 25.0,
+            "apply_palette_mode": "OKLAB_HUE",
+            "use_pixelated_for_quantize": True,
+            "sprite_cleanup": True,
+            "sprite_outline": "OUTSIDE",
+            "sprite_outline_color_mode": "SELECTIVE",
+            "sprite_outline_darken": 0.6,
         },
     },
 )

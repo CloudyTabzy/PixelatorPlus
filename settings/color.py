@@ -156,6 +156,18 @@ class ColorSettings:
         update=mark_dirty,
         description="How generated palettes are extracted from the image",
     )
+    palette_ramp_count: IntProperty(
+        name="Ramps", default=4, min=1, max=32, update=mark_dirty,
+        description="Hue families in a Color Ramps palette",
+    )
+    palette_ramp_steps: IntProperty(
+        name="Shades per Ramp", default=4, min=2, max=8, update=mark_dirty,
+        description="Dark-to-light shades in each ramp",
+    )
+    palette_ramp_hue_shift: FloatProperty(
+        name="Hue Shift", default=20.0, min=0.0, max=60.0, update=mark_dirty,
+        description="Degrees shadows shift toward cool and highlights toward warm",
+    )
     palette_sort_mode: EnumProperty(
         name="Palette Sort", default="NONE", items=PALETTE_SORT_MODES,
         update=mark_dirty,

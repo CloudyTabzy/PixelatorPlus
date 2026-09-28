@@ -32,6 +32,7 @@ _PIN_ATTRIBUTES = {
     "threshold_map": "threshold_map_image",
     "range_map": "range_map_image",
     "id_map": "id_map_image",
+    "light_map": "light_map_image",
 }
 
 
@@ -179,6 +180,11 @@ def required_custom_image_keys(params):
         keys.add("custom_palette_replace")
     if "sprite" in active and resolved.get("sprite_part_lines", False):
         keys.add("id_map")
+    if "shading" in active:
+        if resolved.get("shade_band_source", "LIGHTNESS") == "LIGHT_MAP":
+            keys.add("light_map")
+        if resolved.get("shade_band_per_part", False):
+            keys.add("id_map")
     return keys
 
 

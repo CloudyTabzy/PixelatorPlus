@@ -6,10 +6,12 @@ Restoring runs in the order properties were first changed; callers rely on
 that for Blender 5.x image formats, where ``media_type`` must be set (and
 restored) before ``file_format``.
 
-An **ID map** is a flat, unantialiased Workbench render in which every part
-of the model (each object, or each material) has its own solid color.  The
-sprite stage's Part Lines read it to find where parts meet, which a 2D image
-cannot reveal.
+Map renders describe the scene rather than the look.  An **ID map** is a
+flat, unantialiased Workbench render in which every part of the model (each
+object, or each material) has its own solid color; Part Lines and per-part
+Tone Bands read it to find the parts, which a 2D image cannot reveal.  A
+**light map** renders the model as white clay under studio light, so Tone
+Bands can tell real shadow from dark texture.
 """
 
 import colorsys
@@ -77,29 +79,36 @@ def _distinct_color(index):
     return colorsys.hsv_to_rgb(hue, 1.0, 1.0 if index % 2 == 0 else 0.55)
 
 
-def prepare_id_render(temp, scene, source="OBJECT"):
-    """Turn the next renders into flat, unantialiased part-ID renders."""
+def _prepare_exact_workbench(temp, scene):
+    """Workbench settings shared by map renders: exact, unantialiased, raw colors."""
     render, display = scene.render, scene.display
     shading, view = display.shading, scene.view_settings
     temp.set(render, "engine", "BLENDER_WORKBENCH")
     temp.set(render, "film_transparent", True)
     temp.set(render, "use_compositing", False)
     temp.try_set(render, "use_motion_blur", False)
-    # Antialiasing would blend neighboring IDs into colors of no part.
+    # Antialiasing would blend neighboring parts into colors of no part.
     temp.set(display, "render_aa", "OFF")
-    # 8-bit output dithering adds per-pixel noise; IDs must be exact.
+    # 8-bit output dithering adds per-pixel noise; maps must be exact.
     temp.try_set(render, "dither_intensity", 0.0)
-    temp.set(shading, "light", "FLAT")
-    temp.set(shading, "color_type", "OBJECT" if source == "OBJECT" else "MATERIAL")
-    for flag in ("show_cavity", "show_object_outline", "show_shadows", "show_xray",
+    for flag in ("show_cavity", "show_object_outline", "show_xray",
                  "show_specular_highlight", "use_dof"):
         temp.try_set(shading, flag, False)
-    # Keep ID colors exact; the available transforms depend on the OCIO config.
+    # The available view transforms depend on the OCIO config.
     temp.try_set(view, "view_transform", "Standard")
     temp.try_set(view, "look", "None")
     temp.try_set(view, "exposure", 0.0)
     temp.try_set(view, "gamma", 1.0)
     temp.try_set(view, "use_curve_mapping", False)
+
+
+def prepare_id_render(temp, scene, source="OBJECT"):
+    """Turn the next renders into flat, unantialiased part-ID renders."""
+    _prepare_exact_workbench(temp, scene)
+    shading = scene.display.shading
+    temp.set(shading, "light", "FLAT")
+    temp.set(shading, "color_type", "OBJECT" if source == "OBJECT" else "MATERIAL")
+    temp.try_set(shading, "show_shadows", False)
     # Assign well-separated colors instead of Workbench's name-hashed random
     # colors, which can make two different parts nearly identical.
     if source == "MATERIAL":
@@ -108,6 +117,29 @@ def prepare_id_render(temp, scene, source="OBJECT"):
         parts, prop = sorted(scene.objects, key=lambda o: o.name), "color"
     for index, part in enumerate(parts):
         temp.set(part, prop, (*_distinct_color(index), 1.0))
+
+
+def prepare_light_render(temp, scene):
+    """Turn the next renders into light maps: white clay under studio light.
+
+    Only lighting remains (shape shading and cast shadows); textures, colors,
+    cavity, and specular highlights are removed, so Tone Bands can tell
+    shadow from dark texture.
+    """
+    _prepare_exact_workbench(temp, scene)
+    shading = scene.display.shading
+    temp.set(shading, "light", "STUDIO")
+    temp.set(shading, "color_type", "SINGLE")
+    temp.set(shading, "single_color", (1.0, 1.0, 1.0))
+    temp.try_set(shading, "show_shadows", True)
+
+
+# Map kinds rendered from the scene: settings preparation and output name.
+MAP_KINDS = {
+    "id_map": ("ID Map", lambda temp, scene: prepare_id_render(
+        temp, scene, scene.pixelatorplus.sprite_part_source)),
+    "light_map": ("Light Map", prepare_light_render),
+}
 
 
 def render_still(temp, scene, path):
@@ -127,14 +159,15 @@ def load_pixels(path):
         bpy.data.images.remove(image)
 
 
-def render_id_map(scene, source="OBJECT"):
-    """Render the current frame's ID map and return it (bottom-up RGBA)."""
+def render_map(scene, key):
+    """Render the current frame's ``key`` map (see ``MAP_KINDS``), bottom-up RGBA."""
+    _label, prepare = MAP_KINDS[key]
     temp = TemporarySettings()
-    folder = tempfile.mkdtemp(prefix="pixelatorplus_id_")
+    folder = tempfile.mkdtemp(prefix="pixelatorplus_map_")
     try:
         prepare_png_render(temp, scene)
-        prepare_id_render(temp, scene, source)
-        path = os.path.join(folder, "id_map.png")
+        prepare(temp, scene)
+        path = os.path.join(folder, f"{key}.png")
         render_still(temp, scene, path)
         return load_pixels(path)
     finally:
@@ -142,11 +175,10 @@ def render_id_map(scene, source="OBJECT"):
         shutil.rmtree(folder, ignore_errors=True)
 
 
-class PIXELATORPLUS_OT_render_id_map(bpy.types.Operator):
-    """Render the current frame's ID map (one flat color per part) for Part Lines"""
+class _RenderMapOperator:
+    """Render one map kind for the current frame and pin it in the settings."""
 
-    bl_idname = "pixelatorplus.render_id_map"
-    bl_label = "Render ID Map"
+    map_key = ""
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -155,18 +187,34 @@ class PIXELATORPLUS_OT_render_id_map(bpy.types.Operator):
 
     def execute(self, context):
         scene = context.scene
-        settings = scene.pixelatorplus
+        label = MAP_KINDS[self.map_key][0]
         try:
-            pixels = render_id_map(scene, settings.sprite_part_source)
+            pixels = render_map(scene, self.map_key)
         except RuntimeError as exc:
-            self.report({"ERROR"}, f"Could not render the ID map: {exc}")
+            self.report({"ERROR"}, f"Could not render the {label}: {exc}")
             return {"CANCELLED"}
-        image = array_to_image(pixels, f"{scene.name} [PixelatorPlus ID Map]")
-        settings.id_map_image = image
-        self.report({"INFO"}, f"ID map '{image.name}' rendered; Part Lines will use it")
+        image = array_to_image(pixels, f"{scene.name} [PixelatorPlus {label}]")
+        setattr(scene.pixelatorplus, f"{self.map_key}_image", image)
+        self.report({"INFO"}, f"{label} '{image.name}' rendered and pinned")
         return {"FINISHED"}
 
 
-classes = (PIXELATORPLUS_OT_render_id_map,)
+class PIXELATORPLUS_OT_render_id_map(_RenderMapOperator, bpy.types.Operator):
+    """Render the current frame's ID map (one flat color per part) for Part Lines and Tone Bands"""
+
+    bl_idname = "pixelatorplus.render_id_map"
+    bl_label = "Render ID Map"
+    map_key = "id_map"
+
+
+class PIXELATORPLUS_OT_render_light_map(_RenderMapOperator, bpy.types.Operator):
+    """Render the current frame's light map (texture-free studio lighting) for Tone Bands"""
+
+    bl_idname = "pixelatorplus.render_light_map"
+    bl_label = "Render Light Map"
+    map_key = "light_map"
+
+
+classes = (PIXELATORPLUS_OT_render_id_map, PIXELATORPLUS_OT_render_light_map)
 
 register, unregister = bpy.utils.register_classes_factory(classes)

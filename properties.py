@@ -25,6 +25,7 @@ from .settings.dither import DitherSettings
 from .settings.finish import FinishSettings
 from .settings.items import V3_GRID_COHERENCE, V3_PALETTE_LOCKS, V3_STAGE_ITEMS
 from .settings.pixels import PixelSettings
+from .settings.shading import ShadingSettings
 from .settings.sheet import SpriteSheetSettings
 from .settings.sprite import SpriteSettings
 from .settings.workflow import WorkflowSettings
@@ -60,6 +61,7 @@ class PixelatorPlusSettings(
     WorkflowSettings,
     PixelSettings,
     ColorSettings,
+    ShadingSettings,
     DitherSettings,
     SpriteSettings,
     FinishSettings,

@@ -93,6 +93,10 @@ APPLY_MODES = [
     ("RGB", "RGB", "Match palette colors in RGB"),
     ("CIELAB", "CIELAB", "Match palette colors in CIELAB"),
     ("OKLAB", "Oklab", "Match palette colors in Oklab"),
+    # -- add-on extra (not from the Substance spec)
+    ("OKLAB_HUE", "Oklab (Hue First)",
+     "Match in Oklab, preferring a shade of the right color over the exact lightness "
+     "(keeps pixels in their color ramp)"),
 ]
 
 
@@ -145,6 +149,7 @@ PALETTE_EXTRACT_METHODS = [
     ("KMEANS", "K-means", "Iterative perceptual palette extraction"),
     ("FREQUENCY", "Frequency", "Most frequent exact display colors"),
     ("EXACT", "Exact Colors", "Unique colors ordered by frequency"),
+    ("RAMPS", "Color Ramps", "Hue families of dark-to-light shades with pixel-art hue shifting"),
 ]
 
 
@@ -197,6 +202,7 @@ ALPHA_POLICIES = [
 V3_STAGE_ITEMS = [
     ("pixelate", "Pixelate", "Build the coherent pixel grid"),
     ("posterize", "Posterize / Levels", "Apply explicit per-channel levels"),
+    ("shading", "Tone Bands", "Shade with a few flat tones (cel look)"),
     ("dither", "Dither", "Apply an ordered/noise/palette threshold pattern"),
     ("quantize", "Quantize", "Apply palette, LUT, or per-channel reduction"),
     ("sprite", "Sprite Cleanup / Outline", "Remove stray cells and outline the silhouette"),

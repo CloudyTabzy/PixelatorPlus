@@ -156,8 +156,10 @@ def _generated_or_shared_palette(image, grid, alpha, params, images):
 def build_shared_palette(frames, params, images=None, samples_per_frame=65536):
     """Generate one palette from several frames so an animation never flickers.
 
-    ``frames`` is an iterable of ``(h, w, 4)`` float32 images (it may be a
-    generator that loads frames lazily).  Each frame runs the stages before
+    ``frames`` is an iterable of ``(h, w, 4)`` float32 images, or of
+    ``(image, frame_images)`` pairs whose dict adds per-frame inputs such as
+    that frame's ID or light map; it may be a generator that loads frames
+    lazily.  Each frame runs the stages before
     quantization, and up to ``samples_per_frame`` evenly spaced visible colors
     per frame are pooled; the pool then goes through the normal generated
     palette workflow (extraction method, forced colors, sort, shift, trim,
@@ -177,7 +179,11 @@ def build_shared_palette(frames, params, images=None, samples_per_frame=65536):
         prep["dither_type"] = "NONE"
     pooled = []
     for frame in frames:
-        result = run_pipeline(frame, prep, images)
+        frame_images = images
+        if isinstance(frame, tuple):
+            frame, extra = frame
+            frame_images = dict(images, **extra)
+        result = run_pipeline(frame, prep, frame_images)
         main = result["main"]
         gw, gh = result["grid"]
         samples = _palette_samples(

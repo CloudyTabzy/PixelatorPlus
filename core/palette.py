@@ -193,7 +193,7 @@ def extract_ramps(colors, ramps=4, steps=4, hue_shift=20.0, seed=1, quality=2):
     its own lightness range (widened when the family is nearly flat).  Shades
     rotate their hue by up to ``hue_shift`` degrees toward cool blue in the
     shadows and warm yellow in the highlights, and lose a little chroma at
-    the extremes; neutral families stay neutral.  Returns ``(K, 3)`` float32
+    the extremes (15% at most); neutral families stay neutral.  Returns ``(K, 3)`` float32
     RGB ordered by family, then dark to light (``K <= ramps * steps``).
     """
     samples = to_space(np.asarray(colors, dtype=np.float32)[:, :3], "OKLAB").astype(np.float32)
@@ -220,8 +220,10 @@ def extract_ramps(colors, ramps=4, steps=4, hue_shift=20.0, seed=1, quality=2):
         middle = 0.5 * (low + high)
         half = max(0.5 * (high - low), 0.5 * _MIN_RAMP_SPAN)
         low, high = max(middle - half, 0.08), min(middle + half, 0.97)
-        a, b = members[:, 1].mean(), members[:, 2].mean()
-        chroma, hue = float(np.hypot(a, b)), float(np.arctan2(b, a))
+        # The median member chroma keeps a family as saturated as its pixels;
+        # the length of the mean a/b vector shrinks whenever hues vary.
+        chroma = float(np.median(np.hypot(members[:, 1], members[:, 2])))
+        hue = float(np.arctan2(members[:, 2].mean(), members[:, 1].mean()))
         for t in shade:
             lightness = low + (t + 1.0) * 0.5 * (high - low)
             if chroma < _NEUTRAL_CHROMA:
@@ -229,7 +231,7 @@ def extract_ramps(colors, ramps=4, steps=4, hue_shift=20.0, seed=1, quality=2):
             else:
                 target = _COOL_HUE if t < 0 else _WARM_HUE
                 shade_hue = _rotate_toward(hue, target, abs(t) * max_shift)
-            shade_chroma = chroma * (1.0 - 0.3 * t * t)
+            shade_chroma = chroma * (1.0 - 0.15 * t * t)
             palette.append((lightness, shade_chroma * np.cos(shade_hue),
                             shade_chroma * np.sin(shade_hue)))
     rgb = from_space(np.asarray(palette, dtype=np.float32), "OKLAB")

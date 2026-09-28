@@ -140,8 +140,14 @@ def _draw_color(layout, s):
     body.prop(s, "quantize_type", text="Mode")
 
     if qt == "CUSTOM_PALETTE":
-        body.prop(s, "k_num_colors", text="Colors")
         body.prop(s, "palette_extract_method", text="Extraction")
+        if s.palette_extract_method == "RAMPS":
+            col = body.column(align=True)
+            col.prop(s, "palette_ramp_count")
+            col.prop(s, "palette_ramp_steps", text="Shades")
+            body.prop(s, "palette_ramp_hue_shift")
+        else:
+            body.prop(s, "k_num_colors", text="Colors")
         body.prop(s, "color_mode", text="Build Space")
         body.prop(s, "apply_palette_mode", text="Match Space")
         body.prop(s, "force_colors")
@@ -223,6 +229,29 @@ def _draw_posterize(layout, s):
     body.prop(s, "posterize_channel_mask", text="Channels")
     body.prop(s, "posterize_alpha_policy", text="Alpha")
     body.prop(s, "range_map_image", text="Range Map")
+
+
+def _draw_tone_bands(layout, s):
+    body = _section(layout, "tone_bands", "Tone Bands", "LIGHT_SUN",
+                    f"{s.shade_band_count} bands" if s.shade_bands else "",
+                    toggle=(s, "shade_bands"))
+    if body is None:
+        return
+    body.prop(s, "shade_band_count")
+    body.prop(s, "shade_flatten")
+    body.prop(s, "shade_band_source")
+    if s.shade_band_source == "LIGHT_MAP":
+        row = body.row(align=True)
+        row.prop(s, "light_map_image", text="Light Map")
+        row.operator("pixelatorplus.render_light_map", text="", icon="RENDER_STILL")
+    body.prop(s, "shade_band_per_part")
+    if s.shade_band_per_part:
+        body.prop(s, "sprite_part_source")
+        row = body.row(align=True)
+        row.prop(s, "id_map_image", text="ID Map")
+        row.operator("pixelatorplus.render_id_map", text="", icon="RENDER_STILL")
+    if s.shade_band_source == "LIGHT_MAP" or s.shade_band_per_part:
+        body.label(text="Sprite sheets render these maps automatically.", icon="INFO")
 
 
 def _draw_dither(layout, s):
@@ -500,6 +529,7 @@ def _draw(layout, context, compositor=False):
     _draw_workflow(layout, s)
     _draw_pixels(layout, s)
     _draw_color(layout, s)
+    _draw_tone_bands(layout, s)
     _draw_dither(layout, s)
     _draw_sprite(layout, s)
     _draw_finish(layout, s)

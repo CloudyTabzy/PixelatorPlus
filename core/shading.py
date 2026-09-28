@@ -28,6 +28,41 @@ BAND_SOURCES = ("LIGHTNESS", "LIGHT_MAP")
 _LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 # Percentiles that bound a region's range, ignoring a few outlier pixels.
 _RANGE_PERCENTILES = (2.0, 98.0)
+# Flatten averages color only within one hue family: hues separated by a gap
+# wider than this (on the color wheel), or near-grays, never blend.
+_HUE_GAP_DEGREES = 30.0
+# Near-gray is judged by saturation relative to lightness (chroma / L):
+# dark shades of a color have little absolute chroma but keep their ratio
+# (about 0.07 and up), while slightly noisy grays stay near 0.01.
+_NEUTRAL_SATURATION = 0.03
+
+
+def _hue_families(lab):
+    """Group ``(N, 3)`` Oklab colors into hue families (-1 = near-gray).
+
+    Hues are sorted around the color wheel and split wherever neighbors are
+    more than ``_HUE_GAP_DEGREES`` apart, so a continuous drift (the shades of
+    one color) stays together while distinct colors separate.
+    """
+    families = np.full(lab.shape[0], -1, dtype=np.int64)
+    chroma = np.hypot(lab[:, 1], lab[:, 2])
+    chromatic = np.flatnonzero(chroma >= _NEUTRAL_SATURATION * np.maximum(lab[:, 0], 0.05))
+    if chromatic.size == 0:
+        return families
+    hue = np.degrees(np.arctan2(lab[chromatic, 2], lab[chromatic, 1])) % 360.0
+    order = np.argsort(hue, kind="stable")
+    sorted_hue = hue[order]
+    gaps = np.diff(np.concatenate([sorted_hue, sorted_hue[:1] + 360.0]))
+    cuts = np.flatnonzero(gaps > _HUE_GAP_DEGREES)
+    if cuts.size == 0:
+        families[chromatic] = 0
+        return families
+    # Start right after a cut so the wrap-around gap separates families.
+    start = (cuts[-1] + 1) % order.size
+    rolled_gaps = np.roll(gaps, -start)
+    family = np.concatenate([[0], np.cumsum(rolled_gaps[:-1] > _HUE_GAP_DEGREES)])
+    families[chromatic[np.roll(order, -start)]] = family
+    return families
 
 
 def _region_labels(shape, id_map):
@@ -53,9 +88,10 @@ def tone_bands(rgb, alpha, bands=3, light=None, id_map=None, flatten=True):
     ranks pixels into bands instead of their own lightness.  ``id_map`` splits
     the image into regions that each get the full set of bands.  Band tones
     spread evenly across each region's own lightness range.  With
-    ``flatten`` every band of a region takes one mean hue and chroma, a pure
-    cel look; without it pixels keep their own color and change only in
-    lightness.  Fully transparent pixels are left unchanged.
+    ``flatten`` each band takes one mean color per hue family (hues split at
+    gaps wider than 30 degrees, plus near-grays), a pure cel look that never
+    blends different colors together; without it pixels keep their own color
+    and change only in lightness.  Fully transparent pixels are left unchanged.
     """
     rgb = np.asarray(rgb, dtype=np.float32)
     h, w = rgb.shape[:2]
@@ -84,8 +120,11 @@ def tone_bands(rgb, alpha, bands=3, light=None, id_map=None, flatten=True):
         out[members, 0] = dark + (band + 0.5) / bands * (bright - dark)
         if flatten:
             for index in np.unique(band):
-                chosen = members[band == index]
-                out[chosen, 1:] = lab[chosen, 1:].mean(axis=0)
+                in_band = members[band == index]
+                families = _hue_families(lab[in_band])
+                for family in np.unique(families):
+                    chosen = in_band[families == family]
+                    out[chosen, 1:] = lab[chosen, 1:].mean(axis=0)
     result = rgb.reshape(-1, 3).copy()
     result[visible] = np.clip(from_space(out[visible], "OKLAB"), 0.0, 1.0)
     return result.reshape(h, w, 3).astype(np.float32)

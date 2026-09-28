@@ -124,17 +124,34 @@ def oklab_to_rgb(lab):
 # Generic dispatch + gamma helpers
 # ---------------------------------------------------------------------------
 
-_TO_SPACE = {"RGB": lambda x: np.asarray(x, dtype=np.float32), "CIELAB": rgb_to_lab, "OKLAB": rgb_to_oklab}
-_FROM_SPACE = {"RGB": lambda x: np.asarray(x, dtype=np.float32), "CIELAB": lab_to_rgb, "OKLAB": oklab_to_rgb}
+# "Hue first" Oklab for palette matching: the chroma axes count double, so a
+# pixel prefers a shade of its own color over another color at the exact
+# lightness.  Coarse shade ramps (a few steps apart in lightness) otherwise
+# match lit colors to a gray of the right brightness.
+_HUE_FIRST = np.array([1.0, 2.0, 2.0], dtype=np.float32)
+
+
+def _rgb_to_oklab_hue_first(rgb):
+    return rgb_to_oklab(rgb) * _HUE_FIRST
+
+
+def _oklab_hue_first_to_rgb(values):
+    return oklab_to_rgb(np.asarray(values, dtype=np.float32) / _HUE_FIRST)
+
+
+_TO_SPACE = {"RGB": lambda x: np.asarray(x, dtype=np.float32), "CIELAB": rgb_to_lab,
+             "OKLAB": rgb_to_oklab, "OKLAB_HUE": _rgb_to_oklab_hue_first}
+_FROM_SPACE = {"RGB": lambda x: np.asarray(x, dtype=np.float32), "CIELAB": lab_to_rgb,
+               "OKLAB": oklab_to_rgb, "OKLAB_HUE": _oklab_hue_first_to_rgb}
 
 
 def to_space(rgb, space):
-    """RGB 0..1 -> target space. `space` in {RGB, CIELAB, OKLAB}."""
+    """RGB 0..1 -> target space. `space` in {RGB, CIELAB, OKLAB, OKLAB_HUE}."""
     return _TO_SPACE[space](rgb)
 
 
 def from_space(values, space):
-    """Target space -> RGB 0..1 (clipped). `space` in {RGB, CIELAB, OKLAB}."""
+    """Target space -> RGB 0..1 (clipped). `space` in {RGB, CIELAB, OKLAB, OKLAB_HUE}."""
     return np.clip(_FROM_SPACE[space](values), 0.0, 1.0).astype(np.float32)
 
 

@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.0] - 2026-09-28
+
+### Added
+
+- **Tone Bands** turns smooth shading into cel-style lightness bands. It can
+  rank pixels by image lightness or a texture-free Workbench Light Map, and
+  optionally gives each object or material its own bands using an ID Map.
+  Sprite sheets render the required maps for every frame.
+- **Color Ramps** extracts hue-family palettes with dark-to-light shades and
+  pixel-art hue shifting. **Oklab (Hue First)** favors a pixel's color family
+  over a closer lightness match when applying a palette.
+- **Cel Sprite** style recipe, combining Tone Bands with Color Ramps.
+
+### Fixed
+
+- Shared sprite-sheet palettes now receive each frame's Light Map and ID Map
+  while sampling Tone Bands, so map-driven sheets render consistently.
+
+### Changed
+
+- Plan schema version 6 adds the `shading` stage; older snapshots remain
+  readable and keep their existing settings.
+
 ## [3.4.0] - 2026-09-28
 
 ### Added
