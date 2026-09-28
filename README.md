@@ -28,6 +28,9 @@ external app, or internet connection required.
 - **From 3D render to game sprite.** Render your model with a transparent
   background, then let PixelatorPlus clean up stray pixels and draw a crisp
   one-pixel outline, just like a pixel artist would.
+- **Line work only Blender can see.** **Part Lines** read your scene to find
+  where a model's parts meet (arm against torso, head against body) and draw
+  the interior pixel lines an artist would add by hand.
 - **Animation to sprite sheet in one click.** **Render Sprite Sheet** renders
   your animation, pixelates every frame with one shared palette (no color
   flicker), and packs them into a game-ready sheet with a JSON atlas.
@@ -92,6 +95,10 @@ external app, or internet connection required.
   neighboring color, the classic pixel-art "sel-out"), the **Darkest** palette
   color, or a **Custom** color. Outlines stay on your palette.
 - **Outline Corners** adds diagonal pixels for a heavier, rounder look.
+- **Part Lines** draw one-pixel lines where two parts of your model meet,
+  always on the shadow side. Parts are your **Objects** or **Materials**.
+  **Render ID Map** captures them for a single image, and **Render Sprite
+  Sheet** does it for every frame automatically.
 
 ### Sprite Sheet
 

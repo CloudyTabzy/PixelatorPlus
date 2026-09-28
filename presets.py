@@ -124,6 +124,8 @@ EFFECT_BASELINE = {
     "sprite_outline_darken": 0.5,
     "sprite_outline_corners": False,
     "sprite_alpha_threshold": 0.5,
+    "sprite_part_lines": False,
+    "sprite_part_source": "OBJECT",
 }
 
 

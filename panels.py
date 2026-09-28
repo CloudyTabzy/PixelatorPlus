@@ -291,6 +291,8 @@ def _draw_sprite(layout, s):
     parts = []
     if s.sprite_outline != "NONE":
         parts.append("Outline")
+    if s.sprite_part_lines:
+        parts.append("Lines")
     if s.sprite_cleanup:
         parts.append("Cleanup")
     body = _section(layout, "sprite", "Sprite", "OUTLINER_OB_GREASEPENCIL",
@@ -300,15 +302,23 @@ def _draw_sprite(layout, s):
     body.prop(s, "sprite_cleanup")
     if s.sprite_cleanup:
         body.prop(s, "sprite_cleanup_agreement", text="Agreement")
+    body.prop(s, "sprite_part_lines")
+    if s.sprite_part_lines:
+        body.prop(s, "sprite_part_source")
+        row = body.row(align=True)
+        row.prop(s, "id_map_image", text="ID Map")
+        row.operator("pixelatorplus.render_id_map", text="", icon="RENDER_STILL")
+        body.label(text="Sprite sheets render ID maps automatically.", icon="INFO")
     body.prop(s, "sprite_outline")
     if s.sprite_outline != "NONE":
-        body.prop(s, "sprite_outline_color_mode", text="Color")
+        body.prop(s, "sprite_outline_corners", text="Corners")
+    if s.sprite_outline != "NONE" or s.sprite_part_lines:
+        body.prop(s, "sprite_outline_color_mode")
         if s.sprite_outline_color_mode == "CUSTOM":
             body.prop(s, "sprite_outline_color", text="Custom")
         elif s.sprite_outline_color_mode == "SELECTIVE":
             body.prop(s, "sprite_outline_darken", slider=True)
-        body.prop(s, "sprite_outline_corners", text="Corners")
-    if s.sprite_cleanup or s.sprite_outline != "NONE":
+    if s.sprite_cleanup or s.sprite_outline != "NONE" or s.sprite_part_lines:
         body.prop(s, "sprite_alpha_threshold", slider=True)
         body.label(text="Uses transparency: render with Film > Transparent.", icon="INFO")
 

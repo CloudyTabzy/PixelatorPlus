@@ -1,11 +1,11 @@
 from . import (
-    apply, assets, export, hybrid, material, palette, plan, presets, render_result, sheet,
-    utility,
+    apply, assets, export, hybrid, material, palette, plan, presets, render_result, rendering,
+    sheet, utility,
 )
 
 _modules = (
-    apply, assets, export, hybrid, material, palette, plan, presets, render_result, sheet,
-    utility,
+    apply, assets, export, hybrid, material, palette, plan, presets, render_result, rendering,
+    sheet, utility,
 )
 
 

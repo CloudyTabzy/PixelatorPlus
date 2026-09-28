@@ -22,10 +22,14 @@ import numpy as np
 
 from ..core import sheet as sheet_mod
 from ..core.pipeline import PipelineError, build_shared_palette, run_pipeline
+from ..core.plan import normalize_plan, stage_types
 from ..properties import collect_params
-from .apply import array_to_image, custom_images, image_to_array
-from .export import format_setting_names, save_image_copy, set_still_format
+from .apply import array_to_image, custom_images
+from .export import save_image_copy
 from .hybrid import baked_output_drives_compositor
+from .rendering import (
+    TemporarySettings, load_pixels, prepare_id_render, prepare_png_render, render_still,
+)
 
 SHEET_ATLAS_KEY = "pixelatorplus_sheet_atlas"
 
@@ -65,48 +69,33 @@ class SpriteSheetJob:
         self.index = 0
         self.completed = 0
         self.image = None
+        # Part Lines need an ID map rendered with every frame.
+        self.part_lines = (
+            self.params.get("sprite_part_lines", False)
+            and "sprite" in stage_types(normalize_plan(self.params))
+        )
+        self.id_paths = []
+        self._frame = scene.frame_current
         self._tmp = tempfile.mkdtemp(prefix="pixelatorplus_sheet_")
-        self._saved = {}
+        self._temp = TemporarySettings()
         self._override_scene()
 
     # -- scene settings --------------------------------------------------------
     def _override_scene(self):
-        render = self.scene.render
-        formats = render.image_settings
-        self._saved = {
-            "frame": self.scene.frame_current,
-            "render": {name: getattr(render, name)
-                       for name in ("filepath", "use_file_extension", "film_transparent",
-                                    "use_compositing")},
-            "format": {name: getattr(formats, name)
-                       for name in format_setting_names(
-                           formats, ("file_format", "color_mode", "color_depth"))},
-            # Per-frame compositor bakes would run for every sheet frame.
-            "auto_bake": self.settings.auto_bake_render,
-        }
-        render.use_file_extension = True
+        prepare_png_render(self._temp, self.scene, self.settings.sheet_transparent)
         if baked_output_drives_compositor(self.scene):
             # A connected baked Image node would make every frame that one
             # static image; frames need the raw render.
-            render.use_compositing = False
-        if self.settings.sheet_transparent:
-            render.film_transparent = True
-        set_still_format(formats, "PNG")
-        formats.color_mode = "RGBA"
-        formats.color_depth = "8"
-        self.settings.auto_bake_render = False
+            self._temp.set(self.scene.render, "use_compositing", False)
+        # Per-frame compositor bakes would run for every sheet frame.
+        self._temp.set(self.settings, "auto_bake_render", False)
 
     def close(self):
         """Restore the scene and remove temporary frames (safe to call twice)."""
-        if self._saved:
-            render = self.scene.render
-            for name, value in self._saved["format"].items():
-                setattr(render.image_settings, name, value)
-            for name, value in self._saved["render"].items():
-                setattr(render, name, value)
-            self.settings.auto_bake_render = self._saved["auto_bake"]
-            self.scene.frame_set(self._saved["frame"])
-            self._saved = {}
+        if self._temp is not None:
+            self._temp.restore()
+            self._temp = None
+            self.scene.frame_set(self._frame)
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     # -- progress --------------------------------------------------------------
@@ -118,7 +107,8 @@ class SpriteSheetJob:
     def status(self):
         count = len(self.frame_numbers)
         if self.phase == "render":
-            return f"Rendering frame {self.index + 1}/{count}"
+            extra = " and its ID map" if self.part_lines else ""
+            return f"Rendering frame {self.index + 1}/{count}{extra}"
         if self.phase == "palette":
             return "Building the shared palette"
         if self.phase == "process":
@@ -135,11 +125,11 @@ class SpriteSheetJob:
                 self.phase, self.index = ("palette" if self.shared else "process"), 0
         elif self.phase == "palette":
             self.palette = build_shared_palette(
-                (self._load(path) for path in self.paths), self.params, self.images
+                (load_pixels(path) for path in self.paths), self.params, self.images
             )
             self.phase = "process"
         elif self.phase == "process":
-            self._process(self.paths[self.index])
+            self._process(self.index)
             self.index += 1
             if self.index == len(self.paths):
                 self.phase = "pack"
@@ -151,27 +141,27 @@ class SpriteSheetJob:
         return False
 
     def _render(self, frame):
-        path = os.path.join(self._tmp, f"frame_{frame:06d}.png")
         self.scene.frame_set(frame)
-        self.scene.render.filepath = path
-        bpy.ops.render.render(write_still=True, scene=self.scene.name)
-        if not os.path.isfile(path):
-            raise RuntimeError(f"Blender did not write rendered frame {frame}")
+        path = os.path.join(self._tmp, f"frame_{frame:06d}.png")
+        render_still(self._temp, self.scene, path)
         self.paths.append(path)
+        if self.part_lines:
+            id_path = os.path.join(self._tmp, f"id_{frame:06d}.png")
+            id_temp = TemporarySettings()
+            try:
+                prepare_id_render(id_temp, self.scene, self.settings.sprite_part_source)
+                render_still(id_temp, self.scene, id_path)
+            finally:
+                id_temp.restore()
+            self.id_paths.append(id_path)
 
-    @staticmethod
-    def _load(path):
-        image = bpy.data.images.load(path, check_existing=False)
-        try:
-            return image_to_array(image)
-        finally:
-            bpy.data.images.remove(image)
-
-    def _process(self, path):
+    def _process(self, index):
         images = dict(self.images)
         if self.palette is not None:
             images["shared_palette"] = self.palette
-        result = run_pipeline(self._load(path), self.params, images=images)
+        if self.part_lines:
+            images["id_map"] = load_pixels(self.id_paths[index])
+        result = run_pipeline(load_pixels(self.paths[index]), self.params, images=images)
         self.grid = result["grid"]
         cells =sheet_mod.native_frame(result["main"], self.grid, self.settings.sheet_pixel_scale)
         # Blender buffers are bottom-up; sheets and atlases are top-down.

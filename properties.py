@@ -673,8 +673,26 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
             ("INSIDE", "Inside", "Recolor the silhouette's own edge cells"),
         ],
     )
+    sprite_part_lines: BoolProperty(
+        name="Part Lines", default=False, update=_mark_dirty,
+        description="Draw one-pixel lines where the model's parts meet (needs an ID map)",
+    )
+    sprite_part_source: EnumProperty(
+        name="Parts", default="OBJECT", update=_mark_dirty,
+        items=[
+            ("OBJECT", "Objects", "Each object is one part"),
+            ("MATERIAL", "Materials", "Each material is one part"),
+        ],
+        description="What counts as one part when an ID map is rendered",
+    )
+    id_map_image: PointerProperty(
+        name="ID Map", type=bpy.types.Image, update=_mark_dirty,
+        description="Flat per-part color render with the same framing as the input "
+        "(Render ID Map creates one; sprite sheets render their own)",
+    )
     sprite_outline_color_mode: EnumProperty(
-        name="Outline Color", default="SELECTIVE", update=_mark_dirty,
+        name="Line Color", default="SELECTIVE", update=_mark_dirty,
+        description="Color of outlines and part lines",
         items=[
             ("SELECTIVE", "Selective", "Darken the neighboring sprite color (pixel-art sel-out)"),
             ("DARKEST", "Darkest Palette Color", "Use the darkest color of the active palette"),
@@ -682,14 +700,14 @@ class PixelatorPlusSettings(bpy.types.PropertyGroup):
         ],
     )
     sprite_outline_color: FloatVectorProperty(
-        name="Outline Color", size=3, default=(0.05, 0.05, 0.08), min=0.0, max=1.0,
+        name="Custom Line Color", size=3, default=(0.05, 0.05, 0.08), min=0.0, max=1.0,
         subtype="COLOR_GAMMA", update=_mark_dirty,
         description="Fixed outline color (snapped to the palette when one is active)",
     )
     sprite_outline_darken: FloatProperty(
         name="Darken", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
         update=_mark_dirty,
-        description="How much darker than the sprite a selective outline is",
+        description="How much darker than the sprite selective lines are",
     )
     sprite_outline_corners: BoolProperty(
         name="Outline Corners", default=False, update=_mark_dirty,

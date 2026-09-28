@@ -31,6 +31,7 @@ _PIN_ATTRIBUTES = {
     "strength_map": "strength_map_image",
     "threshold_map": "threshold_map_image",
     "range_map": "range_map_image",
+    "id_map": "id_map_image",
 }
 
 
@@ -176,6 +177,8 @@ def required_custom_image_keys(params):
         keys.add("custom_lut")
     if qtype == "CUSTOM_PALETTE" and ("quantize" in active or palette_threshold):
         keys.add("custom_palette_replace")
+    if "sprite" in active and resolved.get("sprite_part_lines", False):
+        keys.add("id_map")
     return keys
 
 
