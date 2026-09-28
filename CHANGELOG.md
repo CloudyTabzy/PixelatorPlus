@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.5] - 2026-09-28
+
+### Fixed
+
+- Scene-content checks ignore empty mesh objects while still recognizing
+  modifier-generated geometry and renderable collection instances.
+
 ## [3.5.4] - 2026-09-28
 
 ### Fixed

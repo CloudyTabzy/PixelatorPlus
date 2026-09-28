@@ -43,13 +43,41 @@ def scene_has_renderable_content(scene):
         for obj in collection.objects:
             if obj.hide_render:
                 continue
-            if obj.type in _RENDERABLE_OBJECT_TYPES:
+            if _object_has_renderable_content(obj):
                 return True
             if (obj.type == "EMPTY" and obj.instance_type == "COLLECTION"
                     and obj.instance_collection is not None):
                 pending.append((obj.instance_collection, path))
         pending.extend((child, path) for child in collection.children)
     return False
+
+
+def _object_has_renderable_content(obj):
+    """Check for actual object data while allowing modifiers to generate it."""
+    if obj.type not in _RENDERABLE_OBJECT_TYPES:
+        return False
+    if len(obj.modifiers):
+        return True
+    data = obj.data
+    if data is None:
+        return False
+    if obj.type == "MESH":
+        return bool(len(data.vertices))
+    if obj.type in ("CURVE", "SURFACE"):
+        return bool(len(data.splines))
+    if obj.type == "FONT":
+        return bool(str(data.body).strip())
+    if obj.type == "META":
+        return bool(len(data.elements))
+    if obj.type == "VOLUME":
+        return bool(len(data.grids))
+    if obj.type == "POINTCLOUD":
+        return bool(len(data.points))
+    if obj.type == "CURVES":
+        return bool(len(data.curves))
+    # Grease Pencil's layer/frame structure differs across Blender versions;
+    # a layer is a conservative indication that it may contain strokes.
+    return bool(len(data.layers))
 
 
 class TemporarySettings:
