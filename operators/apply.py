@@ -252,7 +252,8 @@ class PIXELATORPLUS_OT_apply(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.scene is not None and context.scene.pixelatorplus.input_image is not None
+        image = context.scene.pixelatorplus.input_image if context.scene else None
+        return bool(image and image.size[0] > 0 and image.size[1] > 0)
 
     def execute(self, context):
         try:

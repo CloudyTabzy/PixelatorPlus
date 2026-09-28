@@ -43,7 +43,9 @@ def sheet_frame_numbers(scene):
         start, end = settings.sheet_frame_start, settings.sheet_frame_end
     if end < start:
         raise ValueError(f"the sprite sheet frame range {start}-{end} is empty")
-    return list(range(start, end + 1, max(1, settings.sheet_frame_step)))
+    # Keep the range lazy: a mistaken huge scene range must not allocate one
+    # Python integer per frame before the user can see progress or cancel.
+    return range(start, end + 1, max(1, settings.sheet_frame_step))
 
 
 class SpriteSheetJob:
@@ -260,9 +262,13 @@ class PIXELATORPLUS_OT_render_sprite_sheet(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         scene = context.scene
-        return bool(
-            scene and scene.camera and scene_has_renderable_content(scene)
-        )
+        if not scene or not scene.camera or not scene_has_renderable_content(scene):
+            return False
+        try:
+            sheet_frame_numbers(scene)
+        except ValueError:
+            return False
+        return True
 
     def execute(self, context):
         try:

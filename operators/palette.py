@@ -62,6 +62,7 @@ class PIXELATORPLUS_OT_freeze_palette(bpy.types.Operator):
         settings = context.scene.pixelatorplus if context.scene else None
         return bool(
             settings and settings.input_image
+            and settings.input_image.size[0] > 0 and settings.input_image.size[1] > 0
             # Only generated palettes vary between frames.
             and settings.quantize_type == "CUSTOM_PALETTE"
             and not any(

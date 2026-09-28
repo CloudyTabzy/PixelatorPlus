@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.4] - 2026-09-28
+
+### Fixed
+
+- Large sprite-sheet ranges stay lazy during setup and the panel warns before
+  rendering a long range; empty ranges disable the render button.
+- The workflow, output, compositor, and plan sections explain the input or
+  result needed by disabled actions, and large images are called out as
+  full-resolution Apply work.
+- Apply and Bake Input are unavailable for images with no pixel dimensions.
+
 ## [3.5.3] - 2026-09-28
 
 ### Fixed

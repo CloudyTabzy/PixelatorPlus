@@ -97,6 +97,15 @@ def _draw_workflow(layout, s):
     row = layout.row()
     row.scale_y = 1.5
     row.operator("pixelatorplus.apply", icon="IMAGE_DATA")
+    if s.input_image is None:
+        layout.label(text="Choose an input image to enable Apply and Live Preview.",
+                     icon="INFO")
+    elif min(s.input_image.size) <= 0:
+        layout.label(text="The selected input has no pixel data; choose another image.",
+                     icon="ERROR")
+    elif max(s.input_image.size) > s.preview_max_size:
+        layout.label(text="Apply uses full resolution; Live Preview is capped to Max Size.",
+                     icon="INFO")
     if s.last_output_name:
         layout.label(text=s.last_output_name, icon="CHECKMARK")
 
@@ -401,10 +410,21 @@ def _draw_finish(layout, s):
     body.prop(s, "finish_channel_mask", text="Channels")
 
 
-def _draw_output(layout, s):
+def _draw_output(layout, s, context):
     body = _section(layout, "output", "Output", "FILE_IMAGE")
     if body is None:
         return
+    output = bpy.data.images.get(s.last_output_name) if s.last_output_name else None
+    palette = bpy.data.images.get(s.last_palette_name) if s.last_palette_name else None
+    lut = bpy.data.images.get(s.last_lut_name) if s.last_lut_name else None
+    if output is None:
+        body.label(text="Run Apply before exporting or connecting an output.", icon="INFO")
+    elif palette is None and lut is None:
+        body.label(text="Palette and LUT exports appear when Apply generates those outputs.",
+                   icon="INFO")
+    obj = getattr(context, "active_object", None)
+    if output is not None and (obj is None or not hasattr(obj.data, "materials")):
+        body.label(text="Select a material-capable object to enable hookup.", icon="INFO")
     body.prop(s, "output_palette")
     if s.quantize_type == "CUSTOM_PALETTE":
         body.prop(s, "output_lut")
@@ -434,13 +454,19 @@ def _draw_sprite_sheet(layout, scene):
                     f"{count} frames" if count else "No frames")
     if body is None:
         return
+    has_content = bool(scene.camera and scene_has_renderable_content(scene))
     row = body.row()
     row.scale_y = 1.3
     row.operator("pixelatorplus.render_sprite_sheet", icon="RENDER_ANIMATION")
     if scene.camera is None:
         body.label(text="Needs an active scene camera.", icon="ERROR")
-    elif not scene_has_renderable_content(scene):
+    elif not has_content:
         body.label(text="Needs render-enabled scene geometry.", icon="ERROR")
+    if count == 0:
+        body.label(text="Frame range is empty; set End at or after Start.", icon="ERROR")
+    elif count > 60 and has_content:
+        body.label(text=f"{count} frames may take time; reduce the range or press Esc to cancel.",
+                   icon="INFO")
     body.prop(s, "sheet_use_scene_range", text="Scene Range")
     if not s.sheet_use_scene_range:
         col = body.column(align=True)
@@ -489,6 +515,8 @@ def _draw_advanced(layout, s):
         row = snapshot.row(align=True)
         row.operator("pixelatorplus.snapshot_plan", text="Capture", icon="DUPLICATE")
         row.operator("pixelatorplus.restore_plan", text="Restore", icon="LOOP_BACK")
+        if not s.v3_plan_json:
+            snapshot.label(text="Capture a snapshot first to enable Restore.", icon="INFO")
         snapshot.label(text="Image inputs stay linked; only settings are stored.",
                        icon="INFO")
 
@@ -529,6 +557,11 @@ def _draw_compositor(layout, s):
                  icon="RENDER_RESULT")
     col.operator("pixelatorplus.connect_baked_output", text="Connect to Output",
                  icon="LINKED")
+    if s.input_image is None:
+        body.label(text="Choose an input image to enable Bake Input.", icon="INFO")
+    render_result = bpy.data.images.get("Render Result")
+    if render_result is None or min(render_result.size) <= 0:
+        body.label(text="Render the scene first to enable Bake Render.", icon="INFO")
     body.prop(s, "auto_bake_render")
     if s.auto_bake_render:
         body.label(text="Bakes a render's last frame; use Sprite Sheet for animation.",
@@ -554,7 +587,7 @@ def _draw(layout, context, compositor=False):
     _draw_dither(layout, s)
     _draw_sprite(layout, s, context.scene)
     _draw_finish(layout, s)
-    _draw_output(layout, s)
+    _draw_output(layout, s, context)
     _draw_sprite_sheet(layout, context.scene)
     if compositor:
         _draw_compositor(layout, s)
