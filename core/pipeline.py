@@ -332,39 +332,78 @@ def _continuous_lut_fn(lut_name, params, images):
     return None
 
 
-def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=None):
-    """Run PixelatorPlus on an ``(h,w,4)`` float32 image in 0..1.
+class _PipelineState:
+    """Working state handed from stage to stage within one ``run_pipeline``.
 
-    ``progress`` receives ``(fraction, stage_name)`` at safe stage boundaries;
-    ``cancel`` is a caller-owned zero-argument predicate.  Both are optional
-    and are intentionally synchronous so Blender never has to share its data
-    API with a Python worker thread.  Palette Tint retains an exact palette
-    index buffer before Display Finish when one exists: color controls tint
-    palette entries, while spatial finish effects remain post-index display
-    effects and are never nearest-color reclassified.
+    ``image`` is the current ``(h, w, 3)`` RGB and ``alpha`` its ``(h, w, 1)``
+    alpha; ``palette``/``indices`` describe the finite palette and retained
+    index buffer once a stage produces them.
     """
-    images = dict(images or {})
-    plan = normalize_plan(params)
-    params = plan_to_params(plan)
-    active_stages = set(stage_types(plan))
-    _checkpoint(progress, cancel, 0.0, "prepare")
-    img = np.asarray(img, dtype=np.float32)
-    h, w = img.shape[:2]
-    rgb = img[..., :3].astype(np.float32)
-    alpha = img[..., 3:4].astype(np.float32) if img.shape[2] > 3 else np.ones((h, w, 1), np.float32)
-    # Spec: Apply_Palette_Mode defaults to RGB for every nearest-palette lookup.
-    apply_mode = params.get("apply_palette_mode", "RGB")
 
-    # -- 1. Pixelate -------------------------------------------------------
+    def __init__(self, img, params, images, plan):
+        img = np.asarray(img, dtype=np.float32)
+        self.params = params
+        self.images = images
+        self.plan = plan
+        self.active = set(stage_types(plan))
+        self.h, self.w = img.shape[:2]
+        self.image = img[..., :3].astype(np.float32)
+        self.alpha = (
+            img[..., 3:4].astype(np.float32) if img.shape[2] > 3
+            else np.ones((self.h, self.w, 1), np.float32)
+        )
+        # Spec: Apply_Palette_Mode defaults to RGB for every nearest-palette lookup.
+        self.apply_mode = params.get("apply_palette_mode", "RGB")
+        self.lock_mode = str(params.get("v3_palette_lock", "OFF")).upper()
+        # Output_Palette and Palette Tint both need the palette assignment made
+        # by the finite-palette quantizer, before Display Finish can make
+        # colors spatial or continuous.
+        self.retain_indices = (
+            bool(params.get("output_palette", False)) or self.lock_mode == "PALETTE_TINT"
+        )
+        self.grid = None
+        self.gw = self.gh = None
+        self.palette = None
+        self.source_palette = None
+        self.indices = None
+        self.lut_image = None
+        self.tint_applied = False
+
+    def finite_palette(self):
+        """The palette when it is small enough to lock or snap to, else ``None``."""
+        if self.palette is not None and self.palette.shape[0] <= 256:
+            return self.palette
+        return None
+
+    def result(self, main=None):
+        return {
+            "main": (np.concatenate([self.image, self.alpha], axis=-1) if main is None
+                     else main).astype(np.float32),
+            "palette_colors": self.palette,
+            "source_palette_colors": self.source_palette,
+            "palette": None,
+            "palette_index": None,
+            "lut": self.lut_image,
+            "grid": (self.gw, self.gh),
+            "plan": self.plan,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Stages (canonical order; each updates the shared state)
+# ---------------------------------------------------------------------------
+
+def _pixelate_stage(state, preview):
+    params = state.params
     requested_gw, requested_gh = compute_grid(
-        w, h,
+        state.w, state.h,
         params.get("square_pixel_count", 256),
         params.get("use_separate_pixel_count", False),
         params.get("pixel_count_x", 256),
         params.get("pixel_count_y", 256),
     )
-    pixelated, grid = pixelate(
-        rgb,
+    state.image, state.grid = pixelate(
+        state.image,
         requested_gw,
         requested_gh,
         params.get("downscale_mode", "NEAREST"),
@@ -374,281 +413,321 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
         params.get("content_aware_max_dimension", 256),
         params.get("content_aware_seam_mode", "MINIMUM"),
     )
-    gw, gh = grid.shape[1], grid.shape[0]
+    state.gw, state.gh = state.grid.shape[1], state.grid.shape[0]
     if preview and params.get("filter_preview", "NONE") != "NONE":
-        pixelated = resample_preview(grid, w, h, params["filter_preview"])
-    _checkpoint(progress, cancel, 0.2, "pixelate")
+        state.image = resample_preview(state.grid, state.w, state.h, params["filter_preview"])
 
-    # -- 2. Posterize / Levels ---------------------------------------------
-    if "posterize" in active_stages:
-        posterized = posterize_mod.apply_posterize(
-            np.concatenate([pixelated, alpha], axis=-1),
-            levels=params.get("posterize_levels", 8),
-            range_mode=params.get("posterize_range_mode", "FULL"),
-            range_low=params.get("posterize_range_low", 0.0),
-            range_high=params.get("posterize_range_high", 1.0),
-            percentile_low=params.get("posterize_percentile_low", 2.0),
-            percentile_high=params.get("posterize_percentile_high", 98.0),
-            gamma=params.get("posterize_gamma", 1.0),
-            mix=params.get("posterize_mix", 1.0),
-            channels=params.get("posterize_channel_mask", "RGB"),
-            alpha_policy=params.get("posterize_alpha_policy", "PRESERVE"),
-            range_map=images.get("range_map"),
-        )
-        pixelated = posterized[..., :3]
-        alpha = posterized[..., 3:4]
-    _checkpoint(progress, cancel, 0.35, "posterize")
 
-    # -- 3. Dither ----------------------------------------------------------
-    palette_colors = None
+def _posterize_stage(state):
+    params = state.params
+    posterized = posterize_mod.apply_posterize(
+        np.concatenate([state.image, state.alpha], axis=-1),
+        levels=params.get("posterize_levels", 8),
+        range_mode=params.get("posterize_range_mode", "FULL"),
+        range_low=params.get("posterize_range_low", 0.0),
+        range_high=params.get("posterize_range_high", 1.0),
+        percentile_low=params.get("posterize_percentile_low", 2.0),
+        percentile_high=params.get("posterize_percentile_high", 98.0),
+        gamma=params.get("posterize_gamma", 1.0),
+        mix=params.get("posterize_mix", 1.0),
+        channels=params.get("posterize_channel_mask", "RGB"),
+        alpha_policy=params.get("posterize_alpha_policy", "PRESERVE"),
+        range_map=state.images.get("range_map"),
+    )
+    state.image = posterized[..., :3]
+    state.alpha = posterized[..., 3:4]
+
+
+def _dither_stage(state):
+    """Apply dithering; return a finished result when previewing the mask."""
+    params, images = state.params, state.images
     dither_type = params.get("dither_type", "NONE")
-    dither_strategy = str(params.get("dither_strategy", "OVERLAY")).upper()
-    if "dither" in active_stages and dither_type != "NONE":
-        dither_h, dither_w = h, w
-        lock_dither_to_grid = (
-            params.get("lock_dither_to_grid", False)
-            or params.get("v3_grid_coherence", "OFF") == "DITHER_CELL"
-        )
-        if lock_dither_to_grid:
-            dither_h, dither_w = gh, gw
-        dmap = dither_mod.dither_map(
-            dither_type, dither_h, dither_w,
-            seed=params.get("random_seed", 0),
-            custom=images.get("custom_dither"),
-            custom_res=params.get("custom_dither_resolution", (8, 8)),
-        )
-        if lock_dither_to_grid:
-            dmap = upscale_nearest(dmap, w, h)
+    lock_to_grid = (
+        params.get("lock_dither_to_grid", False)
+        or params.get("v3_grid_coherence", "OFF") == "DITHER_CELL"
+    )
+    map_h, map_w = (state.gh, state.gw) if lock_to_grid else (state.h, state.w)
+    dmap = dither_mod.dither_map(
+        dither_type, map_h, map_w,
+        seed=params.get("random_seed", 0),
+        custom=images.get("custom_dither"),
+        custom_res=params.get("custom_dither_resolution", (8, 8)),
+    )
+    if lock_to_grid:
+        dmap = upscale_nearest(dmap, state.w, state.h)
 
-        mask_type = params.get("dither_mask_type", "NONE")
-        show_mask = params.get("preview_dither_mask", False)
-        mask = None
-        if mask_type != "NONE" or show_mask or images.get("strength_map") is not None:
-            mask = _build_dither_mask(pixelated, params, images)
-        if images.get("strength_map") is not None:
-            strength_map = resize_mask(images["strength_map"], pixelated.shape)
-            mask = strength_map if mask is None else mask * strength_map
-        if show_mask:
-            main = np.concatenate([np.repeat(mask[..., None], 3, axis=-1), alpha], axis=-1)
-            return {
-                "main": main.astype(np.float32), "palette_colors": None,
-                "palette": None, "palette_index": None, "lut": None,
-                "grid": (gw, gh), "plan": plan, "source_palette_colors": None,
-            }
-        if dither_strategy == "PALETTE_THRESHOLD":
-            palette_colors = _palette_for_threshold(pixelated, grid, alpha, params, images)
-            if palette_colors is None or palette_colors.shape[0] < 2:
-                raise PipelineError(
-                    "Palette Threshold dithering requires a palette quantization mode "
-                    "or a custom palette image"
-                )
-            threshold = dmap[..., 0]
-            if images.get("threshold_map") is not None:
-                threshold_map = resize_mask(images["threshold_map"], threshold.shape)
-                strength = float(np.clip(params.get("dither_strength", 1.0), 0.0, 1.0))
-                threshold = threshold * (1.0 - strength) + threshold_map * strength
-            pixelated = dither_mod.palette_threshold_dither(
-                pixelated,
-                palette_colors,
-                threshold,
-                apply_mode,
-                params.get("dither_strength", 1.0),
-                params.get("palette_dither_contrast", 1.0),
-                params.get("palette_dither_invert", False),
-                mask,
-            )
-        else:
-            pixelated = dither_mod.apply_dither(
-                pixelated,
-                dmap,
-                blend_mode=params.get("dither_blend_mode", "SOFT_LIGHT"),
-                strength=params.get("dither_strength", 0.25),
-                saturation=params.get("dither_saturation", 0.5),
-                use_gray=params.get("use_gray_dither", False),
-                mask=mask,
-            )
-    _checkpoint(progress, cancel, 0.55, "dither")
+    mask_type = params.get("dither_mask_type", "NONE")
+    show_mask = params.get("preview_dither_mask", False)
+    mask = None
+    if mask_type != "NONE" or show_mask or images.get("strength_map") is not None:
+        mask = _build_dither_mask(state.image, params, images)
+    if images.get("strength_map") is not None:
+        strength_map = resize_mask(images["strength_map"], state.image.shape)
+        mask = strength_map if mask is None else mask * strength_map
+    if show_mask:
+        preview = np.concatenate([np.repeat(mask[..., None], 3, axis=-1), state.alpha], axis=-1)
+        return state.result(main=preview)
 
-    # -- 4. Quantize --------------------------------------------------------
-    out = pixelated
-    palette_img = None
-    palette_index_img = None
-    lut_img = None
+    if str(params.get("dither_strategy", "OVERLAY")).upper() == "PALETTE_THRESHOLD":
+        state.palette = _palette_for_threshold(
+            state.image, state.grid, state.alpha, params, images
+        )
+        if state.palette is None or state.palette.shape[0] < 2:
+            raise PipelineError(
+                "Palette Threshold dithering requires a palette quantization mode "
+                "or a custom palette image"
+            )
+        threshold = dmap[..., 0]
+        if images.get("threshold_map") is not None:
+            threshold_map = resize_mask(images["threshold_map"], threshold.shape)
+            strength = float(np.clip(params.get("dither_strength", 1.0), 0.0, 1.0))
+            threshold = threshold * (1.0 - strength) + threshold_map * strength
+        state.image = dither_mod.palette_threshold_dither(
+            state.image,
+            state.palette,
+            threshold,
+            state.apply_mode,
+            params.get("dither_strength", 1.0),
+            params.get("palette_dither_contrast", 1.0),
+            params.get("palette_dither_invert", False),
+            mask,
+        )
+    else:
+        state.image = dither_mod.apply_dither(
+            state.image,
+            dmap,
+            blend_mode=params.get("dither_blend_mode", "SOFT_LIGHT"),
+            strength=params.get("dither_strength", 0.25),
+            saturation=params.get("dither_saturation", 0.5),
+            use_gray=params.get("use_gray_dither", False),
+            mask=mask,
+        )
+    return None
+
+
+def _quantize_stage(state):
+    params, images = state.params, state.images
     qtype = params.get("quantize_type", "NONE")
     diffuse = params.get("diffusion", "NONE") != "NONE"
-    lock_mode = str(params.get("v3_palette_lock", "OFF")).upper()
-    # Output_Palette and Palette Tint both need the palette assignment made by
-    # the finite-palette quantizer, before Display Finish can make colors
-    # spatial or continuous.
-    retain_palette_indices = (
-        bool(params.get("output_palette", False)) or lock_mode == "PALETTE_TINT"
-    )
-    palette_indices = None
+    gw, gh = state.gw, state.gh
 
-    if "quantize" in active_stages and qtype == "CUSTOM_PALETTE":
-        if palette_colors is None:
-            palette_colors = _generated_or_shared_palette(out, grid, alpha, params, images)
-        out, palette_indices = _palette_quantize(
-            out, gw, gh, palette_colors, apply_mode, params, retain_palette_indices
+    if qtype == "CUSTOM_PALETTE":
+        if state.palette is None:
+            state.palette = _generated_or_shared_palette(
+                state.image, state.grid, state.alpha, params, images
+            )
+        state.image, state.indices = _palette_quantize(
+            state.image, gw, gh, state.palette, state.apply_mode, params, state.retain_indices
         )
 
-    elif "quantize" in active_stages and qtype == "PER_CHANNEL":
+    elif qtype == "PER_CHANNEL":
         if diffuse:
             levels = quantize_mod.per_channel_levels(
                 params.get("quantize_colors_or_bits", "COLORS"),
                 params.get("quantize_colors", 256),
                 params.get("quantize_bits", 8),
             )
-            out = _grid_diffusion(out, gw, gh, quantize_mod.per_channel_snap_fn(levels), params)
+            state.image = _grid_diffusion(
+                state.image, gw, gh, quantize_mod.per_channel_snap_fn(levels), params
+            )
         else:
-            out = quantize_mod.per_channel(
-                out,
+            state.image = quantize_mod.per_channel(
+                state.image,
                 params.get("quantize_colors_or_bits", "COLORS"),
                 params.get("quantize_colors", 256),
                 params.get("quantize_bits", 8),
                 params.get("use_range_adaptive", False),
             )
 
-    elif "quantize" in active_stages and qtype == "LUT":
+    elif qtype == "LUT":
         lut_sel = params.get("lut", "AMIGA")
         color_fn = _continuous_lut_fn(lut_sel, params, images)
         if color_fn is not None:
             # Image and .cube LUTs map colors continuously; there is no finite
             # palette, so diffusion snaps through the LUT itself.
-            out = _grid_diffusion(out, gw, gh, color_fn, params) if diffuse else color_fn(out)
+            state.image = (
+                _grid_diffusion(state.image, gw, gh, color_fn, params) if diffuse
+                else color_fn(state.image)
+            )
         else:
             kind, bits = (
                 resolve_builtin(lut_sel) if lut_sel != "CUSTOM_PALETTE" else ("palette", None)
             )
             if kind == "reduce":
                 if diffuse:
-                    out = _grid_diffusion(
-                        out, gw, gh, quantize_mod.per_channel_snap_fn(1 << bits), params
+                    state.image = _grid_diffusion(
+                        state.image, gw, gh, quantize_mod.per_channel_snap_fn(1 << bits), params
                     )
                 else:
-                    out = quantize_mod.reduce_bits(out, bits)
+                    state.image = quantize_mod.reduce_bits(state.image, bits)
             else:
-                palette_colors = _lut_palette(params, images)
-                out, palette_indices = _palette_quantize(
-                    out, gw, gh, palette_colors, apply_mode, params, retain_palette_indices
+                state.palette = _lut_palette(params, images)
+                state.image, state.indices = _palette_quantize(
+                    state.image, gw, gh, state.palette, state.apply_mode, params,
+                    state.retain_indices,
                 )
         if params.get("output_default_lut", False):
-            lut_img = lut_mod.identity_lut()
+            state.lut_image = lut_mod.identity_lut()
 
-    _checkpoint(progress, cancel, 0.75, "quantize")
 
-    # -- 5. Sprite cleanup / outline ---------------------------------------
-    if "sprite" in active_stages:
-        sprite_palette = (
-            palette_colors
-            if palette_colors is not None and palette_colors.shape[0] <= 256 else None
-        )
-        if params.get("sprite_part_lines", False) and images.get("id_map") is None:
-            raise PipelineError("Part Lines need an ID map image (use Render ID Map)")
-        out, alpha = sprite_mod.apply_sprite_stage(
-            out, alpha, gw, gh, params, sprite_palette, images.get("id_map")
-        )
-        # Changed cells invalidate the quantizer's index buffer; it is
-        # recovered below only if the result is still palette-exact.
-        palette_indices = None
-
-    # Diffusion and threshold dithering already emit palette colors, but their
-    # quantizers do not expose indices.  Recover an index buffer now, before
-    # any finish effect, only if it faithfully reproduces those colors.
-    if retain_palette_indices and palette_indices is None and palette_colors is not None:
-        palette_indices = _palette_indices_for_exact_output(out, palette_colors, apply_mode)
-    # The palette as quantized, before Palette Tint restyles it.  Freezing a
-    # palette for animation reuses this, so tinting is never applied twice.
-    source_palette_colors = palette_colors
-    _checkpoint(progress, cancel, 0.8, "sprite")
-
-    # -- 6. Display finish --------------------------------------------------
-    lock_palette = (
-        palette_colors if palette_colors is not None and palette_colors.shape[0] <= 256 else None
+def _sprite_stage(state):
+    params, images = state.params, state.images
+    if params.get("sprite_part_lines", False) and images.get("id_map") is None:
+        raise PipelineError("Part Lines need an ID map image (use Render ID Map)")
+    state.image, state.alpha = sprite_mod.apply_sprite_stage(
+        state.image, state.alpha, state.gw, state.gh, params,
+        state.finite_palette(), images.get("id_map"),
     )
-    palette_tint_applied = False
-    if lock_mode == "PALETTE_TINT" and lock_palette is not None:
-        tinted = finish_mod.adjust_color(
-            lock_palette.reshape(1, -1, 3),
-            params.get("finish_brightness", 0.0),
-            params.get("finish_contrast", 1.0),
-            params.get("finish_exposure", 0.0),
-            params.get("finish_saturation", 1.0),
-        ).reshape(-1, 3)
-        amount = float(np.clip(params.get("v3_palette_lock_strength", 1.0), 0.0, 1.0))
-        palette_colors = (
-            lock_palette * (1.0 - amount) + tinted * amount
-        ).astype(np.float32)
-        if palette_indices is not None:
-            # Palette Tint owns the discrete assignment.  It must transform
-            # entries by their retained index rather than nearest-matching the
-            # finished color, which can collapse distinct source indices.
-            out = _apply_palette_indices(palette_colors, palette_indices)
-            palette_tint_applied = True
+    # Changed cells invalidate the quantizer's index buffer; it is recovered
+    # afterwards only if the result is still palette-exact.
+    state.indices = None
 
-    if "display_finish" in active_stages and params.get("finish_enabled", False):
-        finish_mask = None
-        finish_mask_type = params.get("finish_mask_type", "NONE")
-        if finish_mask_type != "NONE":
-            mask_params = dict(params)
-            mask_params["mask_invert"] = params.get("finish_mask_invert", False)
-            finish_mask = _build_dither_mask(out, mask_params, images, finish_mask_type)
-        if images.get("strength_map") is not None:
-            strength_map = resize_mask(images["strength_map"], out.shape)
-            finish_mask = strength_map if finish_mask is None else finish_mask * strength_map
-        finish_settings = params
-        if palette_tint_applied:
-            # Palette Tint consumes the global color controls while preserving
-            # the discrete palette.  Grain, scanlines, vignette, aberration,
-            # and their masks remain true post-index display effects; their
-            # pixels are intentionally not reclassified afterwards.
-            finish_settings = dict(params)
-            finish_settings.update({
-                "finish_brightness": 0.0,
-                "finish_contrast": 1.0,
-                "finish_exposure": 0.0,
-                "finish_saturation": 1.0,
-            })
-        rgba = np.concatenate([out, alpha], axis=-1)
-        rgba = finish_mod.apply_finish(
-            rgba, finish_settings, params.get("random_seed", 0), finish_mask
+
+def _recover_indices(state):
+    """Recover the index buffer before finishing, when the image is palette-exact.
+
+    Diffusion and threshold dithering emit palette colors without exposing
+    indices, and the sprite stage invalidates them.
+    """
+    if state.retain_indices and state.indices is None and state.palette is not None:
+        state.indices = _palette_indices_for_exact_output(
+            state.image, state.palette, state.apply_mode
         )
-        out = rgba[..., :3]
 
-    # -- 7. V3 pixel-grid coherence and palette identity -------------------
+
+def _palette_tint(state):
+    """Restyle the palette entries (Palette Tint) and repaint by retained index."""
+    params = state.params
+    source = state.finite_palette()
+    tinted = finish_mod.adjust_color(
+        source.reshape(1, -1, 3),
+        params.get("finish_brightness", 0.0),
+        params.get("finish_contrast", 1.0),
+        params.get("finish_exposure", 0.0),
+        params.get("finish_saturation", 1.0),
+    ).reshape(-1, 3)
+    amount = float(np.clip(params.get("v3_palette_lock_strength", 1.0), 0.0, 1.0))
+    state.palette = (source * (1.0 - amount) + tinted * amount).astype(np.float32)
+    if state.indices is not None:
+        # Palette Tint owns the discrete assignment.  It must transform
+        # entries by their retained index rather than nearest-matching the
+        # finished color, which can collapse distinct source indices.
+        state.image = _apply_palette_indices(state.palette, state.indices)
+        state.tint_applied = True
+
+
+def _finish_stage(state):
+    params, images = state.params, state.images
+    finish_mask = None
+    finish_mask_type = params.get("finish_mask_type", "NONE")
+    if finish_mask_type != "NONE":
+        mask_params = dict(params)
+        mask_params["mask_invert"] = params.get("finish_mask_invert", False)
+        finish_mask = _build_dither_mask(state.image, mask_params, images, finish_mask_type)
+    if images.get("strength_map") is not None:
+        strength_map = resize_mask(images["strength_map"], state.image.shape)
+        finish_mask = strength_map if finish_mask is None else finish_mask * strength_map
+    finish_settings = params
+    if state.tint_applied:
+        # Palette Tint consumes the global color controls while preserving
+        # the discrete palette.  Grain, scanlines, vignette, aberration, and
+        # their masks remain true post-index display effects; their pixels
+        # are intentionally not reclassified afterwards.
+        finish_settings = dict(params)
+        finish_settings.update({
+            "finish_brightness": 0.0,
+            "finish_contrast": 1.0,
+            "finish_exposure": 0.0,
+            "finish_saturation": 1.0,
+        })
+    rgba = finish_mod.apply_finish(
+        np.concatenate([state.image, state.alpha], axis=-1),
+        finish_settings, params.get("random_seed", 0), finish_mask,
+    )
+    state.image = rgba[..., :3]
+
+
+def _grid_and_identity(state):
+    """Final-cell grid coherence, then Index Guard (snap back to the palette)."""
+    params = state.params
     if params.get("v3_grid_coherence", "OFF") == "FINAL_CELL":
-        out = upscale_nearest(downscale_area(out, gw, gh), w, h)
-    if lock_mode == "SNAP_BACK" and lock_palette is not None:
+        state.image = upscale_nearest(
+            downscale_area(state.image, state.gw, state.gh), state.w, state.h
+        )
+    if state.lock_mode == "SNAP_BACK" and state.finite_palette() is not None:
         # Only Output_Palette consumes the indices after this point.
-        out, palette_indices = _snap_to_palette(
-            out, palette_colors, apply_mode, bool(params.get("output_palette", False))
+        state.image, state.indices = _snap_to_palette(
+            state.image, state.palette, state.apply_mode,
+            bool(params.get("output_palette", False)),
         )
 
-    # Derived outputs describe the finalized palette state, not the palette
-    # that existed before Palette Tint.  A retained index buffer remains the
-    # authoritative Output_Palette representation when a spatial finish has
-    # subsequently changed display pixels.
-    if params.get("output_palette", False) and palette_colors is not None:
-        palette_img = quantize_mod.palette_swatch(palette_colors)
-        palette_index_img = quantize_mod.palette_index_image(
-            out, palette_colors, apply_mode, indices=palette_indices,
+
+def _derived_outputs(state, result):
+    """Swatch, index image, and generated LUT from the finalized palette.
+
+    A retained index buffer remains the authoritative Output_Palette
+    representation when a spatial finish has since changed display pixels.
+    """
+    params = state.params
+    if params.get("output_palette", False) and state.palette is not None:
+        result["palette"] = quantize_mod.palette_swatch(state.palette)
+        result["palette_index"] = quantize_mod.palette_index_image(
+            state.image, state.palette, state.apply_mode, indices=state.indices,
         )
     if (
-        "quantize" in active_stages and qtype == "CUSTOM_PALETTE"
-        and params.get("output_lut", False) and palette_colors is not None
+        "quantize" in state.active and params.get("quantize_type", "NONE") == "CUSTOM_PALETTE"
+        and params.get("output_lut", False) and state.palette is not None
     ):
-        lut_img = lut_mod.encode_lut_from_palette(palette_colors)
-    _checkpoint(progress, cancel, 0.95, "display_finish")
+        result["lut"] = lut_mod.encode_lut_from_palette(state.palette)
 
-    main = np.concatenate([out, alpha], axis=-1).astype(np.float32)
+
+def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=None):
+    """Run PixelatorPlus on an ``(h,w,4)`` float32 image in 0..1.
+
+    Stages run in the canonical order (pixelate -> posterize -> dither ->
+    quantize -> sprite -> finish); the plan's stage stack can disable each.
+    ``progress`` receives ``(fraction, stage_name)`` at safe stage boundaries;
+    ``cancel`` is a caller-owned zero-argument predicate.  Both are optional
+    and are intentionally synchronous so Blender never has to share its data
+    API with a Python worker thread.  Palette Tint retains an exact palette
+    index buffer before Display Finish when one exists: color controls tint
+    palette entries, while spatial finish effects remain post-index display
+    effects and are never nearest-color reclassified.
+    """
+    plan = normalize_plan(params)
+    params = plan_to_params(plan)
+    state = _PipelineState(img, params, dict(images or {}), plan)
+    active = state.active
+    _checkpoint(progress, cancel, 0.0, "prepare")
+
+    _pixelate_stage(state, preview)
+    _checkpoint(progress, cancel, 0.2, "pixelate")
+    if "posterize" in active:
+        _posterize_stage(state)
+    _checkpoint(progress, cancel, 0.35, "posterize")
+    if "dither" in active and params.get("dither_type", "NONE") != "NONE":
+        mask_preview = _dither_stage(state)
+        if mask_preview is not None:
+            return mask_preview
+    _checkpoint(progress, cancel, 0.55, "dither")
+    if "quantize" in active:
+        _quantize_stage(state)
+    _checkpoint(progress, cancel, 0.75, "quantize")
+    if "sprite" in active:
+        _sprite_stage(state)
+    _recover_indices(state)
+    # The palette as quantized, before Palette Tint restyles it.  Freezing a
+    # palette for animation reuses this, so tinting is never applied twice.
+    state.source_palette = state.palette
+    _checkpoint(progress, cancel, 0.8, "sprite")
+
+    if state.lock_mode == "PALETTE_TINT" and state.finite_palette() is not None:
+        _palette_tint(state)
+    if "display_finish" in active and params.get("finish_enabled", False):
+        _finish_stage(state)
+    _grid_and_identity(state)
+    result = state.result()
+    _derived_outputs(state, result)
+    _checkpoint(progress, cancel, 0.95, "display_finish")
     _checkpoint(progress, cancel, 1.0, "complete")
-    return {
-        "main": main,
-        "palette_colors": palette_colors,
-        "source_palette_colors": source_palette_colors,
-        "palette": palette_img,
-        "palette_index": palette_index_img,
-        "lut": lut_img,
-        "grid": (gw, gh),
-        "plan": plan,
-    }
+    return result
