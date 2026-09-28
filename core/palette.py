@@ -11,8 +11,8 @@ import json
 
 import numpy as np
 
-from .colorspace import to_space
-from .quantize import kmeans_palette
+from .colorspace import from_space, to_space
+from .quantize import _ITERATIONS, _MAX_SAMPLES, kmeans, kmeans_palette
 
 
 class PaletteAsset:
@@ -163,6 +163,77 @@ def extract_palette(image, method="KMEANS", max_colors=32, space="RGB", quality=
         flat, max_colors, space=space, quality=quality, gamma=gamma,
         force_colors=force_colors, seed=seed,
     )
+
+
+# ---------------------------------------------------------------------------
+# Color ramps (PixelatorPlus-native; hand-built pixel-art palette practice)
+# ---------------------------------------------------------------------------
+
+# Oklab hue angles that shadows and highlights lean toward: cool blue-violet
+# and warm yellow, the usual pixel-art "hue shifting" directions.
+_COOL_HUE = np.radians(264.0)
+_WARM_HUE = np.radians(100.0)
+# Families this flat still get a usable spread of shades.
+_MIN_RAMP_SPAN = 0.3
+# Below this Oklab chroma a family is neutral: its hue is noise, not color.
+_NEUTRAL_CHROMA = 0.02
+
+
+def _rotate_toward(hue, target, amount):
+    """Rotate ``hue`` toward ``target`` by up to ``amount`` radians, no overshoot."""
+    delta = (target - hue + np.pi) % (2.0 * np.pi) - np.pi
+    return hue + np.sign(delta) * min(abs(delta), amount)
+
+
+def extract_ramps(colors, ramps=4, steps=4, hue_shift=20.0, seed=1, quality=2):
+    """Build a palette of ``ramps`` hue families with ``steps`` shades each.
+
+    Colors are clustered in Oklab with lightness down-weighted, so families
+    form by hue and chroma.  Each family becomes a dark-to-light ramp across
+    its own lightness range (widened when the family is nearly flat).  Shades
+    rotate their hue by up to ``hue_shift`` degrees toward cool blue in the
+    shadows and warm yellow in the highlights, and lose a little chroma at
+    the extremes; neutral families stay neutral.  Returns ``(K, 3)`` float32
+    RGB ordered by family, then dark to light (``K <= ramps * steps``).
+    """
+    samples = to_space(np.asarray(colors, dtype=np.float32)[:, :3], "OKLAB").astype(np.float32)
+    if samples.shape[0] == 0:
+        raise ValueError("cannot build color ramps from an empty image")
+    ramps = int(np.clip(ramps, 1, 32))
+    steps = int(np.clip(steps, 2, 16))
+    quality = int(np.clip(quality, 0, 8))
+    rng = np.random.default_rng(seed)
+    if samples.shape[0] > _MAX_SAMPLES[quality]:
+        samples = samples[rng.choice(samples.shape[0], _MAX_SAMPLES[quality], replace=False)]
+    weights = np.array([0.35, 1.0, 1.0], dtype=np.float32)
+    families = min(ramps, samples.shape[0])
+    _centroids, labels = kmeans(samples * weights, families, _ITERATIONS[quality], 2, rng,
+                                return_labels=True)
+    max_shift = np.radians(float(np.clip(hue_shift, 0.0, 90.0)))
+    shade = np.linspace(-1.0, 1.0, steps)  # -1 darkest ... 1 lightest
+    palette = []
+    for family in range(families):
+        members = samples[labels == family]
+        if members.shape[0] == 0:
+            continue
+        low, high = np.percentile(members[:, 0], (5.0, 95.0))
+        middle = 0.5 * (low + high)
+        half = max(0.5 * (high - low), 0.5 * _MIN_RAMP_SPAN)
+        low, high = max(middle - half, 0.08), min(middle + half, 0.97)
+        a, b = members[:, 1].mean(), members[:, 2].mean()
+        chroma, hue = float(np.hypot(a, b)), float(np.arctan2(b, a))
+        for t in shade:
+            lightness = low + (t + 1.0) * 0.5 * (high - low)
+            if chroma < _NEUTRAL_CHROMA:
+                shade_hue = hue
+            else:
+                target = _COOL_HUE if t < 0 else _WARM_HUE
+                shade_hue = _rotate_toward(hue, target, abs(t) * max_shift)
+            shade_chroma = chroma * (1.0 - 0.3 * t * t)
+            palette.append((lightness, shade_chroma * np.cos(shade_hue),
+                            shade_chroma * np.sin(shade_hue)))
+    rgb = from_space(np.asarray(palette, dtype=np.float32), "OKLAB")
+    return np.clip(rgb, 0.0, 1.0).astype(np.float32)
 
 
 def _rgb_to_hsv(rgb):

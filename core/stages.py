@@ -19,6 +19,7 @@ STAGE_SPECS = {
     "pre_adjust": {"cost": "LOW", "draft": True},
     "pixelate": {"cost": "MEDIUM", "draft": True},
     "posterize": {"cost": "LOW", "draft": True},
+    "shading": {"cost": "LOW", "draft": True},
     "palette": {"cost": "HIGH", "draft": False},
     "dither": {"cost": "MEDIUM", "draft": True},
     "diffusion": {"cost": "HIGH", "draft": False},

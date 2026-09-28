@@ -2,12 +2,12 @@
 
 The executor remains compatible with the v2 flat settings dictionary while
 supporting palette-aware dithering, expanded diffusion, `.cube` LUTs,
-pixel-art scaling, sprite cleanup and outlines, and a deterministic
+pixel-art scaling, tone bands, sprite cleanup and lines, and a deterministic
 display-finish stack.  V3 makes the dependency order explicit (pixelate ->
-posterize -> dither -> quantize -> sprite -> finish), allows each stage to be
-disabled through the canonical stage stack, and adds PixelatorPlus-native
-palette-lock and grid-coherence policies without copying another compositor's
-node runtime.
+posterize -> tone bands -> dither -> quantize -> sprite -> finish), allows
+each stage to be disabled through the canonical stage stack, and adds
+PixelatorPlus-native palette-lock and grid-coherence policies without copying
+another compositor's node runtime.
 """
 
 import numpy as np
@@ -19,6 +19,7 @@ from . import lut_cube as lut_cube_mod
 from . import palette as palette_mod
 from . import posterize as posterize_mod
 from . import quantize as quantize_mod
+from . import shading as shading_mod
 from . import sprite as sprite_mod
 from .palettes import resolve as resolve_builtin
 from .plan import normalize_plan, plan_to_params, stage_types
@@ -103,7 +104,16 @@ def _palette_samples(image, grid, alpha, params):
 def _generated_palette(source, params, images=None):
     """Build the selected generated palette from ``(N, 3)`` sample colors."""
     method = str(params.get("palette_extract_method", "KMEANS")).upper()
-    if method in ("FREQUENCY", "EXACT"):
+    if method == "RAMPS":
+        colors = palette_mod.extract_ramps(
+            source,
+            ramps=params.get("palette_ramp_count", 4),
+            steps=params.get("palette_ramp_steps", 4),
+            hue_shift=params.get("palette_ramp_hue_shift", 20.0),
+            seed=_seed(params),
+            quality=params.get("quantize_quality", 2),
+        )
+    elif method in ("FREQUENCY", "EXACT"):
         colors = palette_mod.extract_palette(
             source,
             method=method,
@@ -438,6 +448,26 @@ def _posterize_stage(state):
     state.alpha = posterized[..., 3:4]
 
 
+def _shading_stage(state):
+    """Tone Bands: quantize lightness into flat tones (per part with an ID map)."""
+    params, images = state.params, state.images
+    light = None
+    if params.get("shade_band_source", "LIGHTNESS") == "LIGHT_MAP":
+        light = images.get("light_map")
+        if light is None:
+            raise PipelineError("Tone Bands from a light map need a Light Map image "
+                                "(use Render Light Map)")
+    id_map = None
+    if params.get("shade_band_per_part", False):
+        id_map = images.get("id_map")
+        if id_map is None:
+            raise PipelineError("Tone Bands per part need an ID map image (use Render ID Map)")
+    state.image = shading_mod.tone_bands(
+        state.image, state.alpha, params.get("shade_band_count", 3), light, id_map,
+        params.get("shade_flatten", True),
+    )
+
+
 def _dither_stage(state):
     """Apply dithering; return a finished result when previewing the mask."""
     params, images = state.params, state.images
@@ -684,8 +714,9 @@ def _derived_outputs(state, result):
 def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=None):
     """Run PixelatorPlus on an ``(h,w,4)`` float32 image in 0..1.
 
-    Stages run in the canonical order (pixelate -> posterize -> dither ->
-    quantize -> sprite -> finish); the plan's stage stack can disable each.
+    Stages run in the canonical order (pixelate -> posterize -> tone bands ->
+    dither -> quantize -> sprite -> finish); the plan's stage stack can
+    disable each.
     ``progress`` receives ``(fraction, stage_name)`` at safe stage boundaries;
     ``cancel`` is a caller-owned zero-argument predicate.  Both are optional
     and are intentionally synchronous so Blender never has to share its data
@@ -704,6 +735,8 @@ def run_pipeline(img, params, images=None, preview=False, progress=None, cancel=
     _checkpoint(progress, cancel, 0.2, "pixelate")
     if "posterize" in active:
         _posterize_stage(state)
+    if "shading" in active:
+        _shading_stage(state)
     _checkpoint(progress, cancel, 0.35, "posterize")
     if "dither" in active and params.get("dither_type", "NONE") != "NONE":
         mask_preview = _dither_stage(state)

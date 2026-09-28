@@ -14,13 +14,15 @@ import json
 import math
 
 
-# Schema 5 adds the ``sprite`` stage; schema 1-4 plans remain readable.
-PLAN_SCHEMA_VERSION = 5
+# Schema 5 added the ``sprite`` stage and schema 6 the ``shading`` stage;
+# older plans remain readable.
+PLAN_SCHEMA_VERSION = 6
 PLAN_FORMAT = "PixelatorPlus Plan"
 _KNOWN_STAGES = {
     "pre_adjust",
     "pixelate",
     "posterize",
+    "shading",
     "palette",
     "dither",
     "diffusion",
@@ -29,7 +31,7 @@ _KNOWN_STAGES = {
     "display_finish",
 }
 _CANONICAL_STAGE_ORDER = (
-    "pre_adjust", "pixelate", "posterize", "palette", "dither",
+    "pre_adjust", "pixelate", "posterize", "shading", "palette", "dither",
     "diffusion", "quantize", "sprite", "display_finish",
 )
 _V3_PALETTE_LOCKS = {"OFF", "SNAP_BACK", "PALETTE_TINT"}
@@ -67,6 +69,15 @@ def legacy_to_plan(params):
                     "posterize_percentile_high", "posterize_gamma", "posterize_mix",
                     "posterize_channel_mask", "posterize_alpha_policy",
                 ),
+            )
+        )
+    if params.get("shade_bands", False):
+        stages.append(
+            _stage(
+                "shading",
+                params,
+                ("shade_bands", "shade_band_count", "shade_band_source",
+                 "shade_band_per_part", "shade_flatten"),
             )
         )
     if params.get("dither_type", "NONE") != "NONE":
