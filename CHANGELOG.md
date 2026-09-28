@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the extension version follows [Semantic Versioning](https://semver.org/)
 (`blender_manifest.toml` is the single source of truth).
 
+## [3.5.6] - 2026-09-28
+
+### Fixed
+
+- Redesigned the Suzanne threshold portrait with wider inset ears, recessed
+  eye sockets and pupils, a brow ridge, two-part muzzle, nostrils, and a smile.
+  Landmark placement now follows display-space orientation on non-square images.
+- The frame-sized Suzanne map cache retains only two resolutions to keep large
+  dither maps from accumulating in memory.
+
 ## [3.5.5] - 2026-09-28
 
 ### Fixed

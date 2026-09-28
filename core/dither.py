@@ -14,8 +14,8 @@ bytecode-locked; this is a documented reconstruction.
 Pattern / Amogus maps are built-in reconstructions (the originals are embedded
 textures in the .sbsar type-1 chunk and are not shipped here).
 
-BAYER_2X2 / BAYER_4X4, the HALFTONE_* / CROSSHATCH screens, the SUZANNE meme
-map, and the LUMINANCE / SATURATION / GRADIENT / RADIAL mask sources are
+BAYER_2X2 / BAYER_4X4, the HALFTONE_* / CROSSHATCH screens, the SUZANNE monkey
+portrait map, and the LUMINANCE / SATURATION / GRADIENT / RADIAL mask sources are
 add-on extras of this port — they do not come from the Substance spec.
 """
 
@@ -177,17 +177,15 @@ def _capsule(xx, yy, a, b, radius):
     return dx * dx + dy * dy <= radius * radius
 
 
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=2)
 def suzanne_frame(h, w):
-    """Build a centered, non-tiled Suzanne threshold map for a frame.
+    """Build a centered, non-tiled Suzanne likeness as an ordered threshold map.
 
-    Add-on extra (not from the Substance spec). This is a procedural,
-    clean-room reconstruction of Blender's Suzanne silhouette. Unlike the
-    small hand-drawn tile used originally, it is generated at the requested
-    image size and includes the recognizable fan-shaped ears, brow, eye
-    sockets, muzzle, nostrils, mouth, and tapered neck. The geometry is kept
-    in normalized coordinates so it remains recognizable at preview and full
-    resolution. Returned rows are bottom-up to match Blender image buffers.
+    Add-on extra (not from the Substance spec). The silhouette, recessed ear
+    cups, heavy brow, eye rings, broad muzzle, nostrils, and smile are described
+    procedurally in normalized coordinates. Low thresholds shade the monkey
+    first; the background stays bright so the face resolves as dither density
+    changes. Returned rows are bottom-up for Blender image buffers.
     """
     h, w = int(h), int(w)
     if h <= 0 or w <= 0:
@@ -199,97 +197,85 @@ def suzanne_frame(h, w):
     unit = float(min(h, w))
     y, x = np.mgrid[0:h, 0:w].astype(np.float32)
     x += 0.5 - w * 0.5
-    y += 0.5 - h * 0.5
+    # Express landmarks in display coordinates (positive y points up), then
+    # flip the finished map to Blender's bottom-up pixel-buffer convention.
+    y = h * 0.5 - y - 0.5
     x /= unit
     y /= unit
 
-    head = (
-        _ellipse(x, y, 0.0, -0.07, 0.35, 0.30)
-        | _ellipse(x, y, 0.0, 0.06, 0.29, 0.22)
-        | _ellipse(x, y, 0.0, -0.19, 0.27, 0.21)
-    )
-
-    # Suzanne's ears are broad and angular rather than simple round circles.
-    # The triangles supply the outer points; ellipses keep the inner joins
-    # smooth when the map is downsampled to a small pixel grid.
-    left_ear = (
-        _ellipse(x, y, -0.34, -0.08, 0.14, 0.21)
-        | _triangle(x, y, (-0.24, -0.29), (-0.47, -0.13), (-0.25, 0.13))
-    )
-    right_ear = (
-        _ellipse(x, y, 0.34, -0.08, 0.14, 0.21)
-        | _triangle(x, y, (0.24, -0.29), (0.47, -0.13), (0.25, 0.13))
-    )
+    crown = _ellipse(x, y, 0.0, 0.055, 0.30, 0.32)
+    cheeks = _ellipse(x, y, 0.0, -0.085, 0.32, 0.25)
+    jaw = _ellipse(x, y, 0.0, -0.235, 0.215, 0.135)
+    left_ear = _ellipse(x, y, -0.355, 0.015, 0.135, 0.18)
+    right_ear = _ellipse(x, y, 0.355, 0.015, 0.135, 0.18)
     ears = left_ear | right_ear
-    del left_ear, right_ear
+    silhouette = crown | cheeks | jaw | ears
+    del crown, cheeks, jaw, left_ear, right_ear
 
-    # A tapered neck continues below the jaw, which is a strong silhouette
-    # cue in the supplied front-facing Suzanne reference.
-    neck_progress = np.clip((y - 0.15) / 0.28, 0.0, 1.0)
-    neck_half_width = 0.145 + 0.035 * neck_progress
-    neck = (y >= 0.13) & (y <= 0.43) & (np.abs(x) <= neck_half_width)
-    silhouette = head | ears | neck
-    del head, neck, neck_half_width, neck_progress
+    # A small Bayer grain keeps the threshold surface alive without the
+    # coarse checker effect of the previous 8x8 ramp.
+    ramp = _tile(bayer_matrix(4), h, w)
+    m = (0.83 + 0.14 * ramp).astype(np.float32)
+    m[silhouette] = 0.24 + 0.16 * ramp[silhouette]
+    del silhouette
 
-    # A small ordered texture prevents the silhouette from becoming a flat
-    # posterized blob while keeping its landmarks stable. It is intentionally
-    # deterministic and tileable; only the silhouette itself is frame-sized.
-    ramp = _tile(bayer_matrix(8), h, w)
-    m = (0.90 + 0.08 * ramp).astype(np.float32)
-    m[silhouette] = 0.22 + 0.16 * ramp[silhouette]
-    m[ears] = 0.14 + 0.14 * ramp[ears]
-    del ears
-
-    # Recessed facial landmarks are painted one at a time to keep the peak
-    # memory cost bounded for 4K frames. They remain inside the silhouette,
-    # so the map still reads as a monkey on flat or heavily quantized images.
-    feature = _ellipse(x, y, -0.35, -0.09, 0.075, 0.13) | _ellipse(
-        x, y, 0.35, -0.09, 0.075, 0.13
+    # Suzanne's round ears have an inner bowl and a raised outer rim.
+    feature = _ellipse(x, y, -0.375, 0.025, 0.067, 0.105) | _ellipse(
+        x, y, 0.375, 0.025, 0.067, 0.105
     )
-    feature &= silhouette
-    m[feature] = 0.34 + 0.12 * ramp[feature]
-
-    feature = _capsule(x, y, (-0.28, -0.18), (-0.045, -0.16), 0.038) | _capsule(
-        x, y, (0.045, -0.16), (0.28, -0.18), 0.038
+    m[feature] = 0.57 + 0.08 * ramp[feature]
+    feature = _capsule(x, y, (-0.425, -0.08), (-0.41, 0.105), 0.016) | _capsule(
+        x, y, (0.425, -0.08), (0.41, 0.105), 0.016
     )
-    feature &= silhouette
-    m[feature] = 0.10 + 0.10 * ramp[feature]
+    m[feature] = 0.08 + 0.06 * ramp[feature]
 
-    feature = _ellipse(x, y, -0.16, -0.08, 0.125, 0.125) | _ellipse(
-        x, y, 0.16, -0.08, 0.125, 0.125
+    # Heavy brow ridges sit over recessed eyes; lighter eyeballs and dark
+    # pupils make the face survive at thumbnail size.
+    feature = _capsule(x, y, (-0.255, 0.165), (-0.055, 0.205), 0.038) | _capsule(
+        x, y, (0.055, 0.205), (0.255, 0.165), 0.038
     )
-    feature &= silhouette
-    m[feature] = 0.12 + 0.10 * ramp[feature]
+    m[feature] = 0.08 + 0.08 * ramp[feature]
 
-    feature = _ellipse(x, y, -0.16, -0.08, 0.060, 0.065) | _ellipse(
-        x, y, 0.16, -0.08, 0.060, 0.065
+    feature = _ellipse(x, y, -0.135, 0.065, 0.112, 0.125) | _ellipse(
+        x, y, 0.135, 0.065, 0.112, 0.125
     )
-    feature &= silhouette
-    m[feature] = 0.025 + 0.06 * ramp[feature]
-
-    feature = _capsule(x, y, (0.0, -0.09), (0.0, 0.12), 0.042)
-    feature &= silhouette
-    m[feature] = 0.16 + 0.10 * ramp[feature]
-
-    feature = _ellipse(x, y, -0.095, 0.19, 0.125, 0.105) | _ellipse(
-        x, y, 0.095, 0.19, 0.125, 0.105
+    m[feature] = 0.12 + 0.08 * ramp[feature]
+    feature = _ellipse(x, y, -0.135, 0.055, 0.068, 0.080) | _ellipse(
+        x, y, 0.135, 0.055, 0.068, 0.080
     )
-    feature &= silhouette
-    m[feature] = 0.28 + 0.12 * ramp[feature]
-
-    feature = _ellipse(x, y, 0.0, 0.13, 0.090, 0.065)
-    feature &= silhouette
-    m[feature] = 0.07 + 0.09 * ramp[feature]
-
-    feature = _ellipse(x, y, -0.043, 0.13, 0.025, 0.020) | _ellipse(
-        x, y, 0.043, 0.13, 0.025, 0.020
+    m[feature] = 0.62 + 0.08 * ramp[feature]
+    feature = _ellipse(x, y, -0.125, 0.055, 0.027, 0.042) | _ellipse(
+        x, y, 0.125, 0.055, 0.027, 0.042
     )
-    feature &= silhouette
-    m[feature] = 0.015 + 0.05 * ramp[feature]
+    m[feature] = 0.015 + 0.035 * ramp[feature]
+    feature = _ellipse(x, y, -0.145, 0.082, 0.010, 0.014) | _ellipse(
+        x, y, 0.145, 0.082, 0.010, 0.014
+    )
+    m[feature] = 0.94
 
-    feature = _capsule(x, y, (-0.085, 0.235), (0.085, 0.235), 0.017)
-    feature &= silhouette
-    m[feature] = 0.035 + 0.07 * ramp[feature]
+    # A short bridge leads into the broad, two-lobed muzzle and rounded nose.
+    feature = _capsule(x, y, (0.0, 0.055), (0.0, -0.105), 0.040)
+    m[feature] = 0.34 + 0.08 * ramp[feature]
+    muzzle = _ellipse(x, y, -0.082, -0.17, 0.13, 0.09) | _ellipse(
+        x, y, 0.082, -0.17, 0.13, 0.09
+    )
+    m[muzzle] = 0.58 + 0.06 * ramp[muzzle]
+    nose = _ellipse(x, y, 0.0, -0.105, 0.085, 0.057) | _triangle(
+        x, y, (-0.075, -0.095), (0.075, -0.095), (0.0, -0.175)
+    )
+    m[nose] = 0.025 + 0.035 * ramp[nose]
+    nostrils = _ellipse(x, y, -0.038, -0.11, 0.019, 0.013) | _ellipse(
+        x, y, 0.038, -0.11, 0.019, 0.013
+    )
+    m[nostrils] = 0.0
+
+    # Two curved mouth corners meet below the muzzle to form Suzanne's grin.
+    smile = _capsule(x, y, (-0.145, -0.22), (0.0, -0.255), 0.014) | _capsule(
+        x, y, (0.0, -0.255), (0.145, -0.22), 0.014
+    )
+    m[smile] = 0.02 + 0.035 * ramp[smile]
+    lower_lip = _capsule(x, y, (-0.09, -0.285), (0.09, -0.285), 0.012)
+    m[lower_lip] = 0.64 + 0.06 * ramp[lower_lip]
     return np.clip(m[::-1], 0.0, 1.0).astype(np.float32)
 
 
